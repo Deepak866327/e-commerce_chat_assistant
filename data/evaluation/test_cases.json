@@ -1,0 +1,178 @@
+[
+  {
+    "question": "What is the return window?",
+    "source": "return_refund.pdf",
+    "expected_terms": [
+      "7",
+      "days"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "Can I return a product after 5 days?",
+    "source": "return_refund.pdf",
+    "expected_terms": [
+      "7",
+      "days"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "What condition should returned products be in?",
+    "source": "return_refund.pdf",
+    "expected_terms": [
+      "unused",
+      "packaging"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "How soon should damaged products be reported?",
+    "source": "return_refund.pdf",
+    "expected_terms": [
+      "48",
+      "hours"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "How long does a refund take after inspection?",
+    "source": "return_refund.pdf",
+    "expected_terms": [
+      "5",
+      "7",
+      "business days"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "Are digital gift cards returnable?",
+    "source": "return_refund.pdf",
+    "expected_terms": [
+      "not",
+      "return"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "When can I cancel my order?",
+    "source": "return_refund.pdf",
+    "expected_terms": [
+      "before",
+      "dispatched"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "What is standard shipping time?",
+    "source": "shipping.pdf",
+    "expected_terms": [
+      "4",
+      "6",
+      "business days"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "How long does express shipping take?",
+    "source": "shipping.pdf",
+    "expected_terms": [
+      "1",
+      "2",
+      "business days"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "Is shipping free above 999 rupees?",
+    "source": "shipping.pdf",
+    "expected_terms": [
+      "999",
+      "free"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "What is the standard shipping fee for a 500 rupee order?",
+    "source": "shipping.pdf",
+    "expected_terms": [
+      "49"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "How much does express shipping cost?",
+    "source": "shipping.pdf",
+    "expected_terms": [
+      "99"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "How long does order processing take?",
+    "source": "shipping.pdf",
+    "expected_terms": [
+      "1",
+      "2",
+      "business days"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "Does ShopAssist offer international shipping?",
+    "source": "shipping.pdf",
+    "expected_terms": [
+      "not",
+      "international"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "What is the electronics warranty period?",
+    "source": "warranty.pdf",
+    "expected_terms": [
+      "12",
+      "month"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "Does warranty cover liquid damage?",
+    "source": "warranty.pdf",
+    "expected_terms": [
+      "not",
+      "liquid"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "Does warranty cover manufacturing defects?",
+    "source": "warranty.pdf",
+    "expected_terms": [
+      "manufacturing",
+      "defects"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "What documents are needed for warranty claims?",
+    "source": "warranty.pdf",
+    "expected_terms": [
+      "invoice",
+      "order"
+    ],
+    "answerable": true
+  },
+  {
+    "question": "Where is my order number 12345 right now?",
+    "source": null,
+    "expected_terms": [],
+    "answerable": false
+  },
+  {
+    "question": "What is the exact stock count of iPhone 17?",
+    "source": null,
+    "expected_terms": [],
+    "answerable": false
+  }
+]
