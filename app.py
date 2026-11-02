@@ -45,10 +45,9 @@ with st.sidebar:
 
     st.header("ShopAssist AI")
 
-    st.write("Powered by:")
-    st.write("• Fine-tuned Qwen2.5")
-    st.write("• LangChain")
-    st.write("• ChromaDB RAG")
+    st.write("Powered by:Qwen")
+    
+    
 
     if st.button("Clear conversation"):
 
