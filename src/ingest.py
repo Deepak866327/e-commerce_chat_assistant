@@ -48,11 +48,6 @@ chunks = text_splitter.split_documents(documents)
 
 print(f"Total chunks created: {len(chunks)}")
 
-# Inspect first chunk
-if chunks:
-    print("\nFirst chunk:")
-    print(chunks[0].page_content)
-
 # --------------------------------------------------
 # STEP 3: FREE EMBEDDING MODEL
 # --------------------------------------------------
@@ -60,13 +55,6 @@ if chunks:
 embedding_model = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
-
-# Test one embedding
-test_vector = embedding_model.embed_query(
-    "What is the refund policy?"
-)
-
-print(f"\nEmbedding dimension: {len(test_vector)}")
 
 # --------------------------------------------------
 # STEP 4: CHROMADB VECTOR STORAGE

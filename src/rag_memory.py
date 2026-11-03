@@ -1,4 +1,3 @@
-
 from pathlib import Path
 
 from langchain_ollama import ChatOllama
@@ -9,16 +8,10 @@ from langchain_core.prompts import (
     ChatPromptTemplate,
     MessagesPlaceholder
 )
-from langchain_core.messages import (
-    HumanMessage,
-    AIMessage
-)
 
 # ==========================================
 # STEP 1: INITIALIZE EMBEDDING MODEL
 # ==========================================
-
-print("Loading embedding model...")
 
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
@@ -35,8 +28,6 @@ db = Chroma(
 )
 
 stored_chunks = db._collection.count()
-
-print(f"ChromaDB connected: {stored_chunks} chunks")
 
 if stored_chunks == 0:
     raise RuntimeError(
@@ -205,28 +196,17 @@ OUT_OF_SCOPE_REPLY = (
 # STEP 6: CONVERSATION MEMORY
 # ==========================================
 
-chat_history = []
-
 # Last 8 messages = approximately 4 turns
 MAX_HISTORY_MESSAGES = 8
 
 
 # ==========================================
-# STEP 7: MAIN CHAT LOOP
+# STEP 7: ANSWER CUSTOMER QUESTIONS
 # ==========================================
 
 def ask_shopassist(question, chat_history):
 
     question = question.strip()
-
-    # TEMPORARY DEBUG TEST
-    if "prime minister" in question.lower():
-        print("DEBUG: Guardrail is running!")
-        return {
-            "answer": OUT_OF_SCOPE_REPLY,
-            "search_query": question,
-            "sources": []
-        }
 
     # CHECK SCOPE USING BASE QWEN
     scope_result = scope_chain.invoke({
@@ -234,18 +214,12 @@ def ask_shopassist(question, chat_history):
         "chat_history": chat_history
     }).content.strip().upper()
 
-    print("QUESTION:", question)
-    print("SCOPE RESULT:", repr(scope_result))
-
     if scope_result != "IN_SCOPE":
         return {
             "answer": OUT_OF_SCOPE_REPLY,
             "search_query": question,
             "sources": []
         }
-
-   
-
 
     # A. REWRITE FOLLOW-UP QUESTION
 
@@ -313,59 +287,3 @@ def ask_shopassist(question, chat_history):
             for filename, page in sorted(unique_sources)
         ]
     }
-
-
-def main():
-
-    chat_history = []
-
-    print("\nShopAssist Memory RAG Assistant Started!")
-    print("Type 'exit' to quit.")
-    print("Type 'clear' to reset conversation.")
-
-    while True:
-
-        question = input("\nCustomer: ").strip()
-
-        if question.lower() in ["exit", "quit"]:
-            print("ShopAssist: Goodbye!")
-            break
-
-        if question.lower() == "clear":
-            chat_history.clear()
-            print("Conversation memory cleared.")
-            continue
-
-        if not question:
-            continue
-
-        try:
-            result = ask_shopassist(
-                question,
-                chat_history
-            )
-
-            print("\nSearch query:", result["search_query"])
-            print("\nShopAssist:", result["answer"])
-
-            chat_history.append(
-                HumanMessage(content=question)
-            )
-
-            chat_history.append(
-                AIMessage(content=result["answer"])
-            )
-
-            chat_history = chat_history[-MAX_HISTORY_MESSAGES:]
-
-            print("\nRetrieved sources:")
-
-            for source in result["sources"]:
-                print("-", source)
-
-        except Exception as error:
-            print("\nError:", error)
-
-
-if __name__ == "__main__":
-    main()

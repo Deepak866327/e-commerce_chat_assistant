@@ -8,9 +8,9 @@ An e-commerce customer support assistant built with Streamlit, LangChain, Chroma
 - PDF retrieval with document names and page references.
 - Recent conversation history and follow-up question rewriting.
 - A scope classifier for customer support questions.
-- A Streamlit chat interface and command-line chat scripts.
+- A Streamlit chat interface with conversation history.
 - Local voice transcription with a lightweight multilingual Whisper model, an editable transcript, and browser read-aloud controls.
-- Scripts for dataset preparation and baseline retrieval evaluation.
+- Scripts for policy indexing and dataset preparation.
 
 The assistant provides guidance. It has no connection to an order, payment, cancellation, or refund processing backend.
 
@@ -38,7 +38,7 @@ All remaining commands should be run from the project root unless otherwise indi
 
 ### 1. Prepare the Ollama models
 
-Start the Ollama desktop application, or run `ollama serve` in a separate terminal. Download the base model used for query rewriting, scope classification, and baseline evaluation:
+Start the Ollama desktop application, or run `ollama serve` in a separate terminal. Download the base model used for query rewriting and scope classification:
 
 ```powershell
 ollama pull qwen2.5:1.5b
@@ -73,15 +73,7 @@ The first run downloads `sentence-transformers/all-MiniLM-L6-v2` for embeddings.
 
 Open the local URL printed by Streamlit. The sidebar includes a button to clear the conversation.
 
-For the conversation-aware command-line interface:
-
-```powershell
-.\.venv\Scripts\python.exe -m src.rag_memory
-```
-
-Type `clear` to reset the command-line conversation or `exit` to quit.
-
-## Test voice locally
+## Voice support
 
 Install the updated dependencies and start the app from the project root:
 
@@ -91,7 +83,7 @@ Install the updated dependencies and start the app from the project root:
 ```
 
 Open `http://localhost:8501` on the same computer and allow microphone access.
-Under **Ask with your voice**, record a question of up to 30 seconds and stop
+Click **Ask with your voice** to expand the controls, record a question of up to 30 seconds, and stop
 recording. Click **Transcribe recording**, edit **Review your question** if needed,
 then click **Send voice question**. Voice questions use the same retrieval,
 conversation memory, and scope checks as typed questions.
@@ -130,13 +122,6 @@ speech model using the same account and virtual environment as the app service:
 Keep `models/speech/` between deployments so customer requests do not need to
 download the model. The model files are deployment artifacts, excluded from Git.
 
-Run the recording validation and Streamlit voice-flow checks without downloading
-models or starting Ollama:
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-```
-
 ## Dataset preparation
 
 These optional scripts download the Bitext customer support dataset and produce filtered chat-format training, validation, and test JSONL files:
@@ -148,16 +133,6 @@ These optional scripts download the Bitext customer support dataset and produce 
 
 The downloaded and processed datasets are written under `data/training/` and excluded from Git. Review the upstream dataset's license and terms before using or redistributing it. Running these scripts does not train the custom model.
 
-## Baseline evaluation
-
-After preparing the base model and policy index, run:
-
-```powershell
-.\.venv\Scripts\python.exe src/evaluate.py
-```
-
-The script reads `data/evaluation/test_cases.json` and overwrites `data/evaluation/baseline_results.csv`. It evaluates the base `qwen2.5:1.5b` retrieval pipeline using retrieval hits and approximate keyword matches. These metrics do not evaluate the full Streamlit conversation, custom model, or scope classifier; generated answers still need manual review.
-
 ## Project layout
 
 ```text
@@ -167,15 +142,10 @@ src/voice.py                 Local CPU speech recognition and recording limits
 src/read_aloud.html          Browser speech playback controls
 models/Modelfile              Ollama custom model configuration
 src/rag_memory.py             Main chat pipeline with conversation history
-src/chatbot.py                Reusable chatbot class
 src/ingest.py                 PDF loading, chunking, and indexing
-src/search.py                 Policy retrieval inspection
 src/download_datasets.py      Download the source training dataset
 src/prepare_datasets.py       Prepare filtered chat datasets
-src/create_eval_dataset.py    Generate baseline evaluation cases
-src/evaluate.py               Run baseline evaluation
 data/policies/                Policy documents
-data/evaluation/              Evaluation cases and saved baseline report
 ```
 
 ## Troubleshooting

@@ -11,6 +11,18 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Generated logs and voice recordings
+*.log
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.m4a
+*.webm
+/recordings/
+/generated_audio/
+/data/evaluation/
+
 # Local credentials and configuration
 .env
 .env.*
