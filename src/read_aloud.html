@@ -1,0 +1,71 @@
+<div id="__ELEMENT_ID__" data-speech="__SPEECH_TEXT__">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font:inherit">
+    <button type="button" data-action="play">Read aloud</button>
+    <button type="button" data-action="stop" disabled>Stop</button>
+    <select aria-label="Read-aloud language">
+      <option value="auto">Auto language</option>
+      <option value="en-IN">English (India)</option>
+      <option value="hi-IN">Hindi</option>
+    </select>
+    <span role="status" aria-live="polite" style="font-size:0.85em"></span>
+  </div>
+</div>
+<script>
+(() => {
+  const root = document.getElementById("__ELEMENT_ID__");
+  if (!root) return;
+  const play = root.querySelector('[data-action="play"]');
+  const stop = root.querySelector('[data-action="stop"]');
+  const language = root.querySelector("select");
+  const status = root.querySelector('[role="status"]');
+  const synth = window.speechSynthesis;
+  if (!synth || !window.SpeechSynthesisUtterance) {
+    play.disabled = true;
+    status.textContent = "Read aloud is unavailable in this browser.";
+    return;
+  }
+
+  let active = null;
+  const reset = () => {
+    active = null;
+    play.disabled = false;
+    stop.disabled = true;
+    status.textContent = "";
+  };
+  play.onclick = () => {
+    synth.cancel();
+    const text = root.dataset.speech;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = language.value === "auto"
+      ? (/[\u0900-\u097F]/u.test(text) ? "hi-IN" : "en-IN")
+      : language.value;
+    const voices = synth.getVoices();
+    const voice = voices.find(item => item.lang === utterance.lang)
+      || voices.find(item => item.lang.split("-")[0] === utterance.lang.split("-")[0]);
+    if (voice) utterance.voice = voice;
+    active = utterance;
+    play.disabled = true;
+    stop.disabled = false;
+    status.textContent = "Reading aloud…";
+    utterance.onend = () => { if (active === utterance) reset(); };
+    utterance.onerror = event => {
+      if (active !== utterance) return;
+      reset();
+      if (!["canceled", "interrupted"].includes(event.error)) {
+        status.textContent = "Could not play speech. Try another language or a device voice.";
+      }
+    };
+    synth.speak(utterance);
+  };
+  stop.onclick = () => { synth.cancel(); reset(); };
+
+  // Stop speaking if a rerun or clearing the conversation removes these controls.
+  const observer = new MutationObserver(() => {
+    if (!root.isConnected) {
+      if (active) synth.cancel();
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, {childList: true, subtree: true});
+})();
+</script>

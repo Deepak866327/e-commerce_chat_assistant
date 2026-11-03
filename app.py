@@ -1,162 +1,172 @@
+from hashlib import sha256
+import logging
 
 import streamlit as st
+from langchain_core.messages import AIMessage, HumanMessage
 
-from langchain_core.messages import HumanMessage, AIMessage
-
-# Import existing RAG function with scope guardrail
-from src.rag_memory import ask_shopassist, MAX_HISTORY_MESSAGES
-
-
-# ==========================================
-# STEP 1: PAGE CONFIGURATION
-# ==========================================
-
-st.set_page_config(
-    page_title="ShopAssist AI",
-    page_icon="Home",
-    layout="centered"
-)
+from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist
+from src.speech_controls import speech_controls_html
+from src.voice import MAX_AUDIO_SECONDS, SAMPLE_RATE, SpeechInputError, transcribe_recording
 
 
-# ==========================================
-# STEP 2: PAGE HEADER
-# ==========================================
-
-st.title("ShopAssist AI")
-st.caption("Your AI-powered shopping support assistant")
+logger = logging.getLogger(__name__)
 
 
-# ==========================================
-# STEP 3: CONVERSATION MEMORY
-# ==========================================
+def reset_voice_input():
+    st.session_state.voice_generation += 1
+    st.session_state.voice_transcript = ""
+    st.session_state.voice_recording_digest = None
+    st.session_state.voice_feedback = None
 
-if "messages" not in st.session_state:
+
+def clear_conversation():
     st.session_state.messages = []
-
-if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+    st.session_state.pop("pending_voice_question", None)
+    reset_voice_input()
 
 
-# ==========================================
-# STEP 4: SIDEBAR
-# ==========================================
-
-with st.sidebar:
-
-    st.header("ShopAssist AI")
-
-    st.write("Powered by:Qwen")
-    
-    
-
-    if st.button("Clear conversation"):
-
-        st.session_state.messages = []
-        st.session_state.chat_history = []
-
-        st.rerun()
+def send_voice_question():
+    question = st.session_state.voice_transcript.strip()
+    if question:
+        st.session_state.pending_voice_question = question
+        reset_voice_input()
 
 
-# ==========================================
-# STEP 5: DISPLAY CHAT HISTORY
-# ==========================================
-
-for message in st.session_state.messages:
-
+def render_message(message, index):
     with st.chat_message(message["role"]):
-
         st.markdown(message["content"])
-
         if message.get("sources"):
-
             with st.expander("Retrieved sources"):
-
                 for source in message["sources"]:
                     st.write(source)
+        if message["role"] == "assistant":
+            st.html(
+                speech_controls_html(message["content"], f"reply-{index}"),
+                unsafe_allow_javascript=True,
+            )
 
 
-# ==========================================
-# STEP 6: CUSTOMER INPUT
-# ==========================================
+def render_voice_input(language):
+    with st.expander("Ask with your voice", expanded=True):
+        st.caption(
+            f"Record up to {MAX_AUDIO_SECONDS} seconds, then transcribe and review your question."
+        )
+        recording = st.audio_input(
+            "Record a question",
+            sample_rate=SAMPLE_RATE,
+            key=f"voice_recording_{st.session_state.voice_generation}",
+        )
+        audio = recording.getvalue() if recording is not None else b""
+        digest = sha256(audio).hexdigest() if audio else None
+        if digest != st.session_state.voice_recording_digest:
+            st.session_state.voice_recording_digest = digest
+            st.session_state.voice_transcript = ""
+            st.session_state.voice_feedback = None
 
-question = st.chat_input(
-    "Ask about shipping, returns, refunds..."
-)
-
-
-# ==========================================
-# STEP 7: PROCESS CUSTOMER QUESTION
-# ==========================================
-
-if question:
-
-    # Save customer message
-    st.session_state.messages.append({
-        "role": "user",
-        "content": question
-    })
-
-    # Display customer message
-    with st.chat_message("user"):
-        st.markdown(question)
-
-    # Generate assistant response
-    with st.chat_message("assistant"):
-
-        with st.spinner("ShopAssist is thinking..."):
-
+        if st.button("Transcribe recording", disabled=not audio):
+            st.session_state.voice_transcript = ""
+            st.session_state.voice_feedback = None
             try:
-
-                # IMPORTANT:
-                # Calls src/rag_memory.py
-                # Includes scope guardrail + RAG
-                result = ask_shopassist(
-                    question,
-                    st.session_state.chat_history
+                with st.spinner("Transcribing… The first use may download the speech model."):
+                    result = transcribe_recording(audio, language=language)
+                st.session_state.voice_transcript = result.text
+                st.session_state.voice_feedback = (
+                    "caption",
+                    f"Detected language: {result.language}. Check the transcript before sending.",
+                )
+            except SpeechInputError as error:
+                st.session_state.voice_feedback = ("warning", str(error))
+            except ModuleNotFoundError:
+                st.session_state.voice_feedback = (
+                    "error",
+                    "Speech dependencies are missing. Install requirements.txt and restart the app.",
+                )
+            except Exception:
+                logger.exception("Voice transcription failed")
+                st.session_state.voice_feedback = (
+                    "error",
+                    "Could not transcribe the recording. On first use, an internet connection "
+                    "is needed to download the model. Try again or use text chat.",
                 )
 
-                answer = result["answer"]
-                sources = result["sources"]
+        feedback = st.session_state.voice_feedback
+        if feedback:
+            getattr(st, feedback[0])(feedback[1])
 
-                # Display answer
-                st.markdown(answer)
+        with st.form("voice_question_review"):
+            st.text_area("Review your question", key="voice_transcript", height=100)
+            st.form_submit_button(
+                "Send voice question",
+                on_click=send_voice_question,
+                disabled=not st.session_state.voice_transcript.strip(),
+            )
 
-                # Show retrieved sources only if available
-                if sources:
 
-                    with st.expander("Retrieved sources"):
+def main():
+    st.set_page_config(page_title="ShopAssist AI", page_icon="🛍️", layout="centered")
+    st.title("ShopAssist AI")
+    st.caption("Your AI-powered shopping support assistant")
 
-                        for source in sources:
-                            st.write(source)
+    defaults = {
+        "messages": [],
+        "chat_history": [],
+        "voice_generation": 0,
+        "voice_transcript": "",
+        "voice_recording_digest": None,
+        "voice_feedback": None,
+    }
+    for name, value in defaults.items():
+        st.session_state.setdefault(name, value)
 
-                # Save assistant response
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": answer,
-                    "sources": sources
-                })
+    with st.sidebar:
+        st.header("ShopAssist AI")
+        st.write("Powered by Qwen")
+        st.button("Clear conversation", on_click=clear_conversation)
+        voice_enabled = st.toggle("Voice input", value=True)
+        speech_language = st.selectbox(
+            "Speech language",
+            options=["Auto detect", "Hindi / Hinglish", "English"],
+            disabled=not voice_enabled,
+            help="Try Hindi / Hinglish if automatic detection struggles with mixed speech.",
+        )
+        st.caption("Voice recordings are transcribed locally using a small multilingual model.")
+        st.caption("Read-aloud voices depend on your browser and device.")
 
-                # Update LangChain conversation memory
-                st.session_state.chat_history.append(
-                    HumanMessage(content=question)
-                )
+    for index, message in enumerate(st.session_state.messages):
+        render_message(message, index)
 
-                st.session_state.chat_history.append(
-                    AIMessage(content=answer)
-                )
+    if voice_enabled:
+        language = {"Auto detect": None, "Hindi / Hinglish": "hi", "English": "en"}
+        render_voice_input(language[speech_language])
 
-                # Keep only recent messages
-                st.session_state.chat_history = (
-                    st.session_state.chat_history[
-                        -MAX_HISTORY_MESSAGES:
-                    ]
-                )
+    typed_question = st.chat_input("Ask about shipping, returns, refunds...")
+    question = st.session_state.pop("pending_voice_question", None) or typed_question
+    if not question or not question.strip():
+        return
+    question = question.strip()
 
-            except Exception as error:
+    user_message = {"role": "user", "content": question}
+    render_message(user_message, len(st.session_state.messages))
+    try:
+        with st.spinner("ShopAssist is thinking..."):
+            result = ask_shopassist(question, st.session_state.chat_history)
+    except Exception as error:
+        st.error(f"Something went wrong: {error}")
+        return
 
-                st.error(
-                    f"Something went wrong: {error}"
-                )
+    assistant_message = {
+        "role": "assistant",
+        "content": result["answer"],
+        "sources": result["sources"],
+    }
+    render_message(assistant_message, len(st.session_state.messages) + 1)
+    st.session_state.messages.extend([user_message, assistant_message])
+    st.session_state.chat_history.extend(
+        [HumanMessage(content=question), AIMessage(content=result["answer"])]
+    )
+    st.session_state.chat_history = st.session_state.chat_history[-MAX_HISTORY_MESSAGES:]
 
-                # Remove failed customer message
-                st.session_state.messages.pop()
+
+if __name__ == "__main__":
+    main()
