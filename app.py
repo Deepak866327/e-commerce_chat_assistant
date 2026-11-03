@@ -48,7 +48,7 @@ def render_message(message, index):
 
 
 def render_voice_input(language):
-    with st.expander("Ask with your voice", expanded=True):
+    with st.expander("Ask with your voice", expanded=False):
         st.caption(
             f"Record up to {MAX_AUDIO_SECONDS} seconds, then transcribe and review your question."
         )
