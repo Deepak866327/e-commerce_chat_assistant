@@ -1,4 +1,5 @@
 # Direct dependencies pinned to versions installed in the development environment.
+av==18.1.0
 datasets==5.1.0
 faster-whisper==1.2.1
 langchain-chroma==1.1.0
