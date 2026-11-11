@@ -6,7 +6,9 @@ Keep the existing fine-tuned Ollama registration `shopassist-finetuned`. The
 actual mitao server reports **1.5B Q4_K_M**, digest
 `51e0493f09f1f69b0b3d92b00596cd1fd9aa3ef5db8736d38349e81a6ee3af6b`.
 The request's 3B fine-tuned model is not present; do not substitute an unfine-tuned
-3B model. FAQ generation and verification default to `qwen2.5:3b` separately.
+3B model. FAQ generation now defaults to the existing `shopassist-finetuned`
+registration, as requested. Independent verification uses `qwen2.5:1.5b`; both
+models remain configurable without replacing the answer model.
 
 ```mermaid
 flowchart LR
@@ -44,12 +46,14 @@ The historical A/B baseline retains its original scope filter by default. The
 deployed legacy wrapper supplies the new intent decision so it does not run two
 classification calls. Its policy-answer generation remains the legacy path.
 
-FAQ implementation is a backend workflow, not a customer-facing FAQ list or
-suggestion-button UI. Approved/published question variants improve BM25 recall in
+Reviewed, published FAQ questions now appear as suggestion buttons in the existing
+chat sidebar. Clicking one sends the question through the normal conversation and
+retrieval pipeline. Approved/published question variants also improve BM25 recall in
 the grounded retriever by resolving back to the official source chunk. The answer
 is generated and checked against that source, rather than blindly copying an FAQ.
 Drafts/rejected/outdated FAQs are excluded. The currently deployed legacy answer
-path does not query the FAQ store. The 54 benchmark drafts are evaluation examples,
+path uses policy retrieval for the selected question rather than copying the FAQ
+answer. The 54 benchmark drafts are evaluation examples,
 not published production FAQs, and cannot automatically become customer knowledge.
 
 ## Install and initialize
@@ -115,6 +119,57 @@ After a worker crash during ingestion, stop the worker, inspect status, run
 `recover-ingestion VERSION_ID`, then retry the original job. Automatic retries
 never discard the active source version. Do not run multiple unrelated workers
 against different copies of the same control database.
+
+### FAQ worker and the existing legacy deployment
+
+`python -m src.worker --check` verifies the configured FAQ/verifier model digests;
+`python -m src.worker --once` executes one queued job without a password prompt.
+The worker uses the operating-system service account with an ingestion-only role:
+it cannot approve FAQs, publish them, manage tickets or activate an index. Install
+`deploy/ai-platform/shopassist-worker.service` for continuous processing and load
+the same protected `deploy/ai-platform/runtime.env` in the app service. Queued jobs
+and their status appear in the administrator's FAQ workspace.
+
+For the existing legacy collection, an administrator can run
+`python -m src.admin adopt-legacy-sources`. This checks every existing indexed PDF
+excerpt against the current source page and requires at least 80% coverage of each
+nonempty page before recording source versions. It never modifies vectors or
+publishes an FAQ. It refuses to run with an active upgraded index. This allows
+human-approved FAQ suggestions against the already served sources while the
+grounded index remains gated. If source matching fails, review/reindex separately.
+
+### Human support tickets
+
+Explicit human requests, requests requiring account access, model/index failures
+and unsupported support answers create session-owned tickets. Greetings,
+clarification, unrelated questions and blocked instructions do not. Repeated
+requests reuse the open ticket. Creating tickets does not send email or invoke an
+external help desk. A human team must monitor the queue.
+
+Customers can use **Talk to a human**, see status and replies under **Your support
+tickets**, and add details. These controls use the current Streamlit session;
+reopening the site in a new browser session does not restore previous tickets.
+Support staff use **Staff workspace** with the `support` role. Reviewers and
+evaluators cannot access customer tickets. Staff can assign, reply and resolve;
+resolved/closed tickets accept no further replies or reopening.
+
+Set `SHOPASSIST_SUPPORT_PASSWORD_HASH` with the same hidden-password hashing command
+used for other roles. Administrator/reviewer credentials govern FAQ operations.
+Keep runtime configuration and any provisioned credential file readable only by
+the service account. Never put either in Git.
+
+Questions, history and ticket messages are redacted before storage. Optional
+follow-up email/phone collection is available only when
+`SHOPASSIST_TICKET_ENCRYPTION_KEY` contains a persistent Fernet key. Generate one
+with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+in a private terminal and preserve it between releases. Contact details are
+encrypted at rest and access by authorized staff is audited.
+
+The CLI also provides `--role support tickets`, `ticket-detail REFERENCE`,
+`ticket-update REFERENCE STATUS --assignee NAME`, `ticket-reply REFERENCE reply.txt`
+and `prune-tickets`. Pruning removes only resolved/closed tickets older than
+`SHOPASSIST_TICKET_RETENTION_DAYS` (default 90); run it as a scheduled staff/admin
+maintenance task. Traces may expire independently without deleting open tickets.
 
 ## Datasets and evaluation
 

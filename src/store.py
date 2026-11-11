@@ -65,6 +65,19 @@ CREATE TABLE IF NOT EXISTS audit_log(
 CREATE TABLE IF NOT EXISTS rate_limits(
  subject TEXT NOT NULL, minute INTEGER NOT NULL, count INTEGER NOT NULL,
  PRIMARY KEY(subject,minute));
+CREATE TABLE IF NOT EXISTS tickets(
+ id TEXT PRIMARY KEY, reference TEXT UNIQUE NOT NULL, session_hash TEXT NOT NULL,
+ query_id TEXT REFERENCES traces(id) ON DELETE SET NULL, status TEXT NOT NULL,
+ reason TEXT NOT NULL, payload TEXT NOT NULL, contact_ciphertext TEXT,
+ assignee TEXT, dedupe_key TEXT NOT NULL, created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL, closed_at TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS active_ticket_dedupe ON tickets(session_hash,dedupe_key) WHERE closed_at IS NULL;
+CREATE TABLE IF NOT EXISTS ticket_events(
+ id INTEGER PRIMARY KEY, ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+ actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ticket_messages(
+ id INTEGER PRIMARY KEY, ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+ author TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
 """
 
 
@@ -75,12 +88,13 @@ class Store:
         with self.connect() as conn:
             # Schema is additive; never drop existing data or migrate Chroma.
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version > 2:
+            if version > 3:
                 raise RuntimeError("Database is newer than this application")
             conn.executescript(SCHEMA)
             conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(1,?)", (now(),))
             conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(2,?)", (now(),))
-            conn.execute("PRAGMA user_version=2")
+            conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(3,?)", (now(),))
+            conn.execute("PRAGMA user_version=3")
 
     @contextmanager
     def connect(self):

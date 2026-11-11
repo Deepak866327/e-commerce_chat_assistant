@@ -56,13 +56,15 @@ class OllamaClient:
         except (URLError, TimeoutError, OSError) as exc:
             raise ModelUnavailable("Ollama is unavailable or timed out") from exc
 
-    def structured(self, model, messages, schema, retries=1, num_ctx=4096):
+    def structured(self, model, messages, schema, retries=1, num_ctx=4096, max_output_tokens=1024):
+        if not 1 <= max_output_tokens <= 8192 or num_ctx < 512:
+            raise ValueError("Invalid structured-output token budget")
         conversation = list(messages)
         last_error = None
         for attempt in range(retries + 1):
             payload = {"model": model, "messages": conversation, "stream": False,
                        "format": schema.model_json_schema(), "keep_alive": "5m",
-                       "options": {"temperature": 0, "num_ctx": num_ctx, "num_predict": 1024}}
+                       "options": {"temperature": 0, "num_ctx": num_ctx, "num_predict": max_output_tokens}}
             started = time.perf_counter()
             try:
                 response = self.transport(payload)

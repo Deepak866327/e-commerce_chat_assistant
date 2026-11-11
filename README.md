@@ -10,6 +10,8 @@ An e-commerce customer support assistant built with Streamlit, LangChain, Chroma
 - A scope classifier for customer support questions.
 - A Streamlit chat interface with conversation history.
 - Local voice transcription with a lightweight multilingual Whisper model, an editable transcript, and browser read-aloud controls.
+- Support tickets for unresolved queries, customer replies, and an authenticated staff queue.
+- Reviewed, published FAQ suggestion buttons and background FAQ generation using the existing fine-tuned Qwen model.
 - Scripts for policy indexing and dataset preparation.
 
 The assistant provides guidance. It has no connection to an order, payment, cancellation, or refund processing backend.
@@ -171,9 +173,21 @@ includes **54 unreviewed benchmark drafts**, not 300 approved cases or measured
 quality improvements. Ragas/DeepEval are optional local-model judge adapters.
 Signed reports, regression checks and index rollback support controlled releases.
 
-There was no admin frontend; operations extend the Python project through
-`python -m src.admin --help`. No second web application or external database was
-introduced. SQLite holds transactional workflow state; Chroma still holds vectors.
+Operations extend the Python project through `python -m src.admin --help` and a
+staff workspace in the existing Streamlit app. Support staff can respond to tickets;
+reviewers can review FAQ drafts; administrators can queue generation and publish
+approved FAQs. SQLite holds workflow state; Chroma still holds vectors.
+
+Unresolved support answers and explicit human requests create a ticket. Customers
+can also use **Talk to a human** and check **Your support tickets** in the sidebar.
+Replies are available in the current browser session; click **Refresh ticket** to
+check for a staff response. Optional contact details require a configured encryption
+key. Ticket creation queues the request; it does not promise an immediate human reply.
+
+FAQ suggestions appear after a human reviews and publishes the generated drafts.
+Clicking a question sends it through the normal chat pipeline. Generated drafts,
+rejected FAQs and evaluation data never appear as customer suggestions. See the
+[runbook](docs/AI_PLATFORM_RUNBOOK.md) for staff credentials and worker setup.
 
 - [Audit](docs/AI_UPGRADE_AUDIT.md)
 - [Plan](docs/AI_UPGRADE_PLAN.md)

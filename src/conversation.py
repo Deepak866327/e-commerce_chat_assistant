@@ -39,14 +39,19 @@ def conversational_reply(question):
         route = "capabilities"
         answer = ("Main ShopAssist customer support assistant hoon. Main shipping, returns, "
                   "refunds, cancellations aur warranty ke sawaalon mein madad kar sakta hoon.")
+    elif normalized in {"human support", "talk to a human", "talk to human", "human agent", "speak to a human",
+                        "connect me to a human", "create a ticket", "raise a ticket", "raise ticket", "agent please"}:
+        route = "human_support"
+        answer = "Main aapki request ko human support tak pahunchane mein madad karunga."
     elif normalized in {"help", "help me", "i need help", "can you help", "can you help me",
                         "i need support", "mujhe help chahiye", "mujhe madad chahiye"}:
         route = "clarification"
         answer = "Zaroor. Aap apna sawaal ya problem bataiye, main madad karunga."
     else:
         return None
-    return {"answer": answer, "answerable": True, "sources": [], "citations": [],
-            "needs_human_support": False, "reason": None, "route": route,
+    return {"answer": answer, "answerable": route != "human_support", "sources": [], "citations": [],
+            "needs_human_support": route == "human_support",
+            "reason": "explicit_handoff" if route == "human_support" else None, "route": route,
             "retrieval_required": False, "retrieval_performed": False,
             "search_query": "", "query_id": None, "confidence": None,
             "verification": {"passed": None, "reason": "non_factual_conversation"},

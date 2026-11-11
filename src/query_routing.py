@@ -17,6 +17,8 @@ ACCOUNT_ACTION: request to look up a customer's live order/payment/refund status
 cancel, refund, edit or access an account. The assistant has no account/order backend.
 If the message also asks about an official procedure, eligibility, charge or timeline, choose KNOWLEDGE.
 OUT_OF_SCOPE: unrelated general knowledge, coding, mathematics, entertainment or other non-shopping topics.
+HUMAN_SUPPORT: an explicit request for a human agent, escalation or support ticket, including when
+the customer mentions a shopping topic. Honor this instead of forcing another automated answer.
 Examples:
 'Hi' -> CONVERSATION
 'Thanks, you helped me a lot' -> CONVERSATION
@@ -29,6 +31,7 @@ Examples:
 'Can I cancel after dispatch?' -> KNOWLEDGE
 'How long do refunds take?' -> KNOWLEDGE
 'Write a Python script' -> OUT_OF_SCOPE
+'Please connect me to a human about my refund' -> HUMAN_SUPPORT
 Never answer a policy question in this step. Return the intent only.
 """
 
@@ -44,6 +47,7 @@ def response_without_retrieval(intent):
         "CLARIFICATION": ("Aap apna sawaal ya problem thoda detail mein bata sakte hain?", False, False, "clarification_needed"),
         "ACCOUNT_ACTION": ("Mere paas aapke account ya live order status ka access nahi hai, aur main order cancel ya refund process nahi kar sakta. "
                            "Iske liye customer support team se madad lijiye.", False, True, "account_access_required"),
+        "HUMAN_SUPPORT": ("Main aapki request ko human support tak pahunchane mein madad karunga.", False, True, "explicit_handoff"),
         "OUT_OF_SCOPE": ("Main ShopAssist customer support assistant hoon. Main orders, shipping, returns, refunds, cancellations aur warranty mein help kar sakta hoon.",
                          False, False, "out_of_scope"),
     }

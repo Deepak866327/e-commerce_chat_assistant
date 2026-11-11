@@ -121,11 +121,11 @@ systemd service, and exercise both real-model intent classification and public
 Streamlit greeting/policy/follow-up behavior. Require empty sources and no vector
 calls for greetings/conversation/clarification/account actions/out-of-scope queries.
 Keep the current data/models/index and grounded-release gate unchanged.
-FAQ workflow exists in the backend; no customer FAQ list/buttons are implemented
-and the deployed legacy pipeline does not use FAQ retrieval. Benchmark drafts are
-separate, unreviewed evaluation data.
+The follow-up implementation below adds the customer FAQ buttons and support
+workspace. Benchmark drafts remain separate, unreviewed evaluation data.
 
-1. Provision the separate Qwen 3B FAQ/verifier model on suitable server hardware.
+1. Validate model-backed FAQ generation with the requested existing fine-tuned
+   model and the independent 1.5B verifier. A separate 3B model is optional.
 2. Execute real new-index Chroma/embedding, OCR/Tesseract, FAQ and Ragas/DeepEval integration
    checks. Optional judge dependency ranges need a validated resolved lock.
 3. Stage a complete new index, regenerate benchmark IDs against it, human-review
@@ -141,3 +141,36 @@ Primary changed files are `app.py`, `src/ingest.py`, `src/rag_memory.py`, new
 chat_service,verification,evaluation,evaluation_judges,experiments,benchmarks,
 calibration,observability,jobs,security,release,admin}.py`, configuration/schema
 modules, tests, scripts, dependency extras, deployment files and documentation.
+
+## Ticket handoff and FAQ UI continuation: 2026-11-11
+
+Implemented automatic session-owned support tickets for account access requests,
+explicit human requests and unresolved/error responses in both chat entry points.
+Added an explicit handoff form, customer ticket status/replies, encrypted optional
+contact details and a role-authenticated staff queue inside the existing app.
+Ticket creation is deduplicated/rate-limited; histories/messages are redacted;
+staff changes and contact access are audited. Additive SQLite schema v3 preserves
+existing data. Closed tickets cannot be reopened; configurable retention applies
+through the staff maintenance command.
+
+FAQ generation now uses `shopassist-finetuned` by default with configurable output
+budgets and the independent `qwen2.5:1.5b` verifier. An ingestion-only background
+worker and systemd unit process queued generation. The existing app now includes
+FAQ draft review/edit/approval/publication and published FAQ question buttons.
+Source adoption can map the unchanged legacy index back to verified policy files
+without activating an upgraded index. Drafts and evaluation data stay hidden from
+customers. Human approval is still required before publication.
+
+Validation executed locally: **73 tests passed** (including actual Streamlit UI
+tests for handoff, staff authentication/replies/resolution and FAQ buttons),
+compilation passed and `pip check` passed. New tests cover ticket ownership,
+encrypted contact/redaction, trace expiry, role boundaries, duplicate/rate limits,
+automatic escalation, source adoption and worker permissions.
+
+Deployment of this continuation is pending at this entry. SSH to `mitao` works
+intermittently; the existing app remains healthy. The server model catalog now
+also includes `qwen2.5:3b`, but generation will use the requested existing model.
+Next: commit/push, stage the exact commit on the server, rerun its tests, checkpoint
+the running source/configuration/SQLite, install the FAQ worker and staff runtime,
+restart the existing app, then verify real-model FAQ drafts, ticket handoff and
+public HTTPS/WebSocket behavior. Record the actual release result separately.

@@ -1,6 +1,6 @@
 """Shared settings. Importing this module never loads models or creates files."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 import json
 import os
@@ -16,8 +16,8 @@ class Settings:
     ollama_url: str = "http://localhost:11434"
     answer_model: str = "shopassist-finetuned"
     utility_model: str = "qwen2.5:1.5b"
-    faq_model: str = "qwen2.5:3b"
-    verifier_model: str = "qwen2.5:3b"
+    faq_model: str = "shopassist-finetuned"
+    verifier_model: str = "qwen2.5:1.5b"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_revision: str = "local-v1"
     chunk_tokens: int = 500
@@ -42,6 +42,8 @@ class Settings:
     allow_model_download: bool = False
     require_login: bool = False
     pipeline: str = "grounded"
+    ticket_encryption_key: str = field(default="", repr=False)
+    ticket_retention_days: int = 90
 
     def __post_init__(self):
         if self.pipeline not in {"grounded", "legacy"}:
@@ -50,7 +52,7 @@ class Settings:
             raise ValueError("Require 0 <= overlap < chunk_tokens, chunk_tokens >= 50")
         for name in ("dense_k", "keyword_k", "fusion_k", "context_k", "context_tokens",
                      "max_upload_bytes", "max_pages", "max_text_chars", "retention_days", "max_traces",
-                     "requests_per_minute", "faq_per_chunk"):
+                     "requests_per_minute", "faq_per_chunk", "ticket_retention_days"):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be positive")
         if self.model_timeout <= 0 or not 0 <= self.min_dense_similarity <= 1:

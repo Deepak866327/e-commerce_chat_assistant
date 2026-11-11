@@ -9,6 +9,7 @@ from unittest.mock import patch
 from src.config import Settings
 from src.datasets import DatasetRepository, EvaluationCase, reproducible_splits
 from src.faq import FAQService
+from src.faq_catalog import published_suggestions
 from src.ingestion import IngestionService
 from src.ollama_client import InvalidModelOutput, OllamaClient
 from src.schemas import FAQBatch, Scope
@@ -82,6 +83,34 @@ class WorkflowTests(unittest.TestCase):
         result = self.faq.generate(self.chunk["id"], self.admin)
         self.assertEqual(result["faq_ids"], [])
         self.assertIn("Duplicate question", result["rejected"])
+
+    def test_staged_faq_can_be_reviewed_but_not_published_or_suggested(self):
+        with self.store.connect() as conn:
+            conn.execute("UPDATE documents SET active_version=NULL")
+        faq_id = self.faq.generate(self.chunk["id"], self.admin)["faq_ids"][0]
+        self.faq.transition(faq_id, "APPROVED", self.reviewer)
+        self.assertEqual(published_suggestions(self.store), [])
+        with self.assertRaises(ValueError):
+            self.faq.transition(faq_id, "PUBLISHED", self.admin)
+
+    def test_only_published_current_verified_faqs_are_customer_suggestions(self):
+        faq_id = self.faq.generate(self.chunk["id"], self.admin)["faq_ids"][0]
+        self.assertEqual(published_suggestions(self.store), [])
+        self.faq.transition(faq_id, "APPROVED", self.reviewer)
+        self.assertEqual(published_suggestions(self.store), [])
+        self.faq.transition(faq_id, "PUBLISHED", self.admin)
+        self.assertEqual(published_suggestions(self.store), [{"faq_id": faq_id, "question": "When can I return an item?"}])
+        self.faq.edit(faq_id, {"question": "What is the return window?"}, self.reviewer)
+        self.assertEqual(published_suggestions(self.store), [])
+
+    def test_worker_cannot_approve_or_publish_and_invalid_count_is_rejected(self):
+        worker = Principal("background-worker", "worker")
+        worker.require("ingest")
+        for permission in ("review", "publish", "activate", "delete"):
+            with self.assertRaises(PermissionError):
+                worker.require(permission)
+        with self.assertRaises(ValueError):
+            self.faq.generate(self.chunk["id"], self.admin, count=0)
 
     def test_dataset_versioning_review_roundtrip_and_isolation(self):
         repository = DatasetRepository(self.root / "evaluation", self.store)

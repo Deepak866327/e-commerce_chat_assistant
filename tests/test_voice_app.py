@@ -25,6 +25,8 @@ class VoiceAppTests(unittest.TestCase):
         })
         pipeline.ask_shopassist = self.answer
         pipeline.submit_feedback = Mock()
+        self.suggestions = Mock(return_value=[])
+        pipeline.faq_suggestions = self.suggestions
         self.stack.enter_context(patch.dict("sys.modules", {"src.rag_memory": pipeline}))
         self.transcribe = self.stack.enter_context(patch(
             "src.voice.transcribe_recording",
@@ -96,6 +98,19 @@ class VoiceAppTests(unittest.TestCase):
         self.app.selectbox[0].select("Hindi / Hinglish").run()
         self.transcribe_question()
         self.assertEqual(self.transcribe.call_args.kwargs["language"], "hi")
+
+    def test_published_faq_button_sends_question_once_through_normal_chat(self):
+        self.suggestions.return_value = [{"faq_id": "FAQ_one", "question": "How do I request a return?"}]
+        self.app.run()
+        self.button("How do I request a return?").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertEqual(self.answer.call_args.args[0], "How do I request a return?")
+        self.assertEqual(len(self.app.session_state["messages"]), 2)
+        self.app.run()
+        self.answer.assert_called_once()
+
+    def test_empty_published_catalog_does_not_show_faq_buttons(self):
+        self.assertFalse(any(header.value == "Frequently asked questions" for header in self.app.subheader))
 
 
 if __name__ == "__main__":

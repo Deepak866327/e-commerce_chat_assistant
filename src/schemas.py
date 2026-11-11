@@ -59,4 +59,4 @@ class Scope(Contract):
 
 
 class QueryIntent(Contract):
-    intent: Literal["KNOWLEDGE", "CONVERSATION", "CLARIFICATION", "ACCOUNT_ACTION", "OUT_OF_SCOPE"]
+    intent: Literal["KNOWLEDGE", "CONVERSATION", "CLARIFICATION", "ACCOUNT_ACTION", "HUMAN_SUPPORT", "OUT_OF_SCOPE"]

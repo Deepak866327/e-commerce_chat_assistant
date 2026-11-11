@@ -52,7 +52,7 @@ class QueryRoutingTests(unittest.TestCase):
     def test_grounded_nonknowledge_routes_do_not_read_corpus_or_search(self):
         client, retriever, verifier = Mock(calls=[]), Mock(), Mock()
         service = ChatService(self.store, self.settings, client, retriever, verifier)
-        for intent in ("CONVERSATION", "CLARIFICATION", "ACCOUNT_ACTION", "OUT_OF_SCOPE"):
+        for intent in ("CONVERSATION", "CLARIFICATION", "ACCOUNT_ACTION", "HUMAN_SUPPORT", "OUT_OF_SCOPE"):
             client.structured.return_value = QueryIntent(intent=intent)
             with self.subTest(intent=intent):
                 result = service.ask("An arbitrary routed customer message", record=False)
@@ -76,7 +76,7 @@ class QueryRoutingTests(unittest.TestCase):
         from src.rag_memory import ask_shopassist
         legacy = ModuleType("src.legacy_rag")
         legacy.ask_shopassist = Mock(side_effect=AssertionError("No model/index initialization"))
-        for intent in ("CONVERSATION", "CLARIFICATION", "ACCOUNT_ACTION", "OUT_OF_SCOPE"):
+        for intent in ("CONVERSATION", "CLARIFICATION", "ACCOUNT_ACTION", "HUMAN_SUPPORT", "OUT_OF_SCOPE"):
             with patch("src.rag_memory.Settings.from_env", return_value=replace(self.settings, pipeline="legacy")), \
                  patch("src.rag_memory.classify_query", return_value=intent), \
                  patch.dict("sys.modules", {"src.legacy_rag": legacy}):

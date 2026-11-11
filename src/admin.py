@@ -27,7 +27,7 @@ from src.verification import GroundingVerifier
 
 def parser():
     root = argparse.ArgumentParser(description=__doc__)
-    root.add_argument("--role", choices=["admin", "reviewer", "evaluator"], default="admin")
+    root.add_argument("--role", choices=["admin", "reviewer", "evaluator", "support"], default="admin")
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("hash-password", help="Create a role password hash using a hidden prompt")
     commands.add_parser("status")
@@ -47,6 +47,19 @@ def parser():
     faq.add_argument("--count", type=int, default=None)
     faq.add_argument("--enqueue", action="store_true")
     commands.add_parser("list-faqs")
+    commands.add_parser("adopt-legacy-sources")
+    tickets = commands.add_parser("tickets")
+    tickets.add_argument("--include-closed", action="store_true")
+    detail = commands.add_parser("ticket-detail")
+    detail.add_argument("reference")
+    update = commands.add_parser("ticket-update")
+    update.add_argument("reference")
+    update.add_argument("status", choices=["OPEN", "ASSIGNED", "IN_PROGRESS", "WAITING_ON_CUSTOMER", "RESOLVED", "CLOSED"])
+    update.add_argument("--assignee", default="")
+    reply = commands.add_parser("ticket-reply")
+    reply.add_argument("reference")
+    reply.add_argument("message", type=Path)
+    commands.add_parser("prune-tickets")
     seed = commands.add_parser("seed-benchmark")
     seed.add_argument("--index-id")
     rebuild = commands.add_parser("rebuild-index")
@@ -116,6 +129,24 @@ def execute(args, principal, settings):
         return IngestionService(settings, store, ChromaIndex(settings) if index else None)
 
     command = args.command
+    if command in {"tickets", "ticket-detail", "ticket-update", "ticket-reply", "prune-tickets"}:
+        from src.tickets import TicketService
+        tickets = TicketService(store, settings)
+        if command == "tickets":
+            return tickets.list(principal, args.include_closed)
+        if command == "ticket-detail":
+            return tickets.detail(args.reference, principal)
+        if command == "ticket-update":
+            tickets.update(args.reference, args.status, args.assignee, principal)
+            return {"reference": args.reference, "status": args.status}
+        if command == "ticket-reply":
+            tickets.reply(args.reference, args.message.read_text(encoding="utf-8"), principal=principal)
+            return {"reference": args.reference, "reply_saved": True}
+        tickets.prune(principal)
+        return {"retention_applied": True}
+    if command == "adopt-legacy-sources":
+        from src.legacy_sources import adopt_legacy_sources
+        return adopt_legacy_sources(settings, store, principal)
     if command == "status":
         principal.require("read")
         return {"active_index": store.setting("active_index"),

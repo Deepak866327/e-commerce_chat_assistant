@@ -32,6 +32,8 @@ htmlcov/
 !.env.sample
 !.env.template
 .streamlit/secrets.toml
+/deploy/ai-platform/runtime.env
+/deploy/ai-platform/credentials.json
 
 # Model weights and generated data
 *.gguf

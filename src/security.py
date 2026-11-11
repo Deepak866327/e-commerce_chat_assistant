@@ -54,16 +54,18 @@ class Principal:
 
     def require(self, permission):
         permissions = {
-            "admin": {"read", "ingest", "review", "publish", "evaluate", "dataset", "delete", "activate", "backup"},
+            "admin": {"read", "ingest", "review", "publish", "evaluate", "dataset", "delete", "activate", "backup", "tickets", "ticket_manage"},
             "reviewer": {"read", "review", "dataset"},
             "evaluator": {"read", "evaluate"},
+            "worker": {"ingest"},
+            "support": {"tickets", "ticket_manage"},
         }
         if permission not in permissions.get(self.role, set()):
             raise PermissionError(f"Role {self.role} cannot {permission}")
 
 
 def authenticate(role, password):
-    if role not in {"admin", "reviewer", "evaluator"}:
+    if role not in {"admin", "reviewer", "evaluator", "support"}:
         raise PermissionError("Unknown role")
     value = os.getenv("SHOPASSIST_" + role.upper() + "_PASSWORD_HASH", "")
     try:
