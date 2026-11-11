@@ -56,7 +56,7 @@ def _escalate(question, history, session, result, response_language="hinglish", 
             flow.attach_ticket(result, version)
             result["answer"] = message("support_queued" if result.get("reason") in {"explicit_handoff", "existing_handoff"} else
                                        "resolution_handoff", response_language,
-                                       reference=result["ticket"]["reference"], attempts=result["resolution"]["attempts"])
+                                       reference=result["ticket"]["reference"])
         except Exception as exc:
             logger.error("Support ticket creation failed: %s", type(exc).__name__)
             result["ticket_error"] = True
