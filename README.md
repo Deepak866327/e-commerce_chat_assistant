@@ -90,6 +90,12 @@ before activation; see [the platform runbook](docs/AI_PLATFORM_RUNBOOK.md).
 ```
 
 Open the local URL printed by Streamlit. The sidebar includes a button to clear the conversation.
+Choose **Chat language** independently of speech recognition: Hinglish, English,
+or Hindi. The preference applies to conversational replies, account guidance,
+ticket confirmations, abstentions and generated policy answers in both pipelines.
+Customer-reported issue details and attempted steps are kept in bounded session
+context separately from verified policy evidence. Account-action follow-ups can
+continue the same session-owned ticket; a new issue starts fresh context.
 
 ## Voice support
 
@@ -142,14 +148,31 @@ download the model. The model files are deployment artifacts, excluded from Git.
 
 ## Dataset preparation
 
-These optional scripts download the Bitext customer support dataset and produce filtered chat-format training, validation, and test JSONL files:
+These optional scripts download the Bitext customer support dataset and prepare
+filtered **review candidates**. Generic dataset answers are not approved company
+policies and may claim backend capabilities the chatbot does not have:
 
 ```powershell
 .\.venv\Scripts\python.exe src/download_datasets.py
 .\.venv\Scripts\python.exe src/prepare_datasets.py
 ```
 
-The downloaded and processed datasets are written under `data/training/` and excluded from Git. Review the upstream dataset's license and terms before using or redistributing it. Running these scripts does not train the custom model.
+The default preparation command writes `review_candidates.jsonl`, never training
+splits. Review/edit each example, set `reviewed` to `true`, identify the `reviewer`,
+and assign a shared `group_id` to related examples/paraphrases. Supply approved
+`policy_context` for company facts or contact details. Obvious backend-action
+claims must be rewritten. The flags are heuristic review aids, not factual validation.
+Save reviewed entries separately, then export chat-format splits:
+
+```powershell
+.\.venv\Scripts\python.exe src/prepare_datasets.py --reviewed-file data/training/reviewed_examples.jsonl
+```
+
+Export requires at least 20 reviewed examples in three leakage groups; groups
+never cross train/validation/test splits. Evaluation data stays separate.
+The downloaded and processed datasets are written under `data/training/` and
+excluded from Git. Review the upstream dataset's license and terms before using
+or redistributing it. These scripts do not train or replace the custom model.
 
 ## Project layout
 
@@ -211,6 +234,12 @@ Run offline checks with `python -m unittest discover -v` and
 `python -m compileall -q app.py src scripts tests`. Optional extraction/OCR and
 evaluation dependencies are in `requirements-ocr.txt` and `requirements-eval.txt`.
 `python scripts/offline_audit.py` generates extraction and chunk-structure reports.
+`python scripts/evaluate_support_routes.py` checks deterministic conversation
+routes and explicitly reports skipped model cases. Add `--model-backed` with
+local Ollama available to test complaint/policy/follow-up classification. This
+development routing check does not measure factual accuracy or authorize release.
+See [the incremental support changes](docs/SUPPORT_IMPROVEMENTS.md) for scope,
+validation and remaining model-backed work.
 
 Existing deployments can explicitly set `SHOPASSIST_PIPELINE=legacy` while staging
 the upgrade. This preserves the previous customer answer pipeline and collection;
