@@ -107,7 +107,20 @@ then a structured history-aware KNOWLEDGE/CONVERSATION/CLARIFICATION/ACCOUNT_ACT
 OUT_OF_SCOPE filter. Only KNOWLEDGE reaches retrieval; model/index loading is lazy.
 Mixed greeting/policy messages and follow-ups continue to the policy pipeline.
 Local validation after this correction: **50 tests passed**, compilation passed,
-and dependency check passed. Push/deployment verification is pending at this entry.
+and dependency check passed. The fix was pushed to GitHub `main` as **`0b05a82`**.
+The server deployment is **not verified or activated**: repeated SSH/SCP attempts
+timed out during banner exchange or were reset before authentication. The exact
+release archive reached `/home/ubuntu/shopassist-intent-0b05a82.tar.gz`; uploading
+the deployment procedure and executing it did not succeed. No successful restart
+or source activation for this correction has been observed. The earlier deployed
+code remains `2ff9cd7` until a subsequent verified release.
+
+Next for this fix: restore SSH connectivity to `mitao`, checkpoint the running
+source, stage commit `0b05a82`, run all 50 server tests, restart through the existing
+systemd service, and exercise both real-model intent classification and public
+Streamlit greeting/policy/follow-up behavior. Require empty sources and no vector
+calls for greetings/conversation/clarification/account actions/out-of-scope queries.
+Keep the current data/models/index and grounded-release gate unchanged.
 FAQ workflow exists in the backend; no customer FAQ list/buttons are implemented
 and the deployed legacy pipeline does not use FAQ retrieval. Benchmark drafts are
 separate, unreviewed evaluation data.
