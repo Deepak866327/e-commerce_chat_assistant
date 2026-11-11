@@ -44,8 +44,14 @@
 - Local `.venv` now has the original pinned runtime packages, pinned Pydantic and
   PDF/OCR extras. It is isolated from unrelated global packages.
 - `.venv/Scripts/python.exe -m unittest discover -v`: **31 passed**.
+- After preserving/adapting server voice tests: **42 passed** locally; compilation
+  and `pip check` passed again.
 - Compilation of app/source/scripts/tests: passed.
 - `.venv/Scripts/python.exe -m pip check`: passed.
+- Preserved the server-only voice unit/UI tests in the repository. Initial server
+  staging ran 42 tests and found six UI mock import failures (the old mock lacked
+  the new `submit_feedback` API). Added that mock without weakening assertions;
+  live service was not changed by the failed preflight.
 - Real extraction of all three policy PDFs and the DOCX: passed.
 - Streamlit AppTest startup and customer-message/abstention smoke checks: passed
   with no app exceptions (base environment Streamlit 1.55.0).
@@ -69,7 +75,9 @@ Server RAM: about 11 GiB total, 10 GiB available. Local RAM: about 7.7 GiB total
 The grounded production release gate remains **closed**. Compatibility deployment
 may use the existing legacy answer pipeline while new capabilities are staged.
 No claim is made that the acceptance targets are met or all live integrations are
-validated. Git push and server deployment outcomes must be recorded separately.
+validated. Commit `a137d80` was pushed to GitHub `main`. A compatibility follow-up
+preserves the discovered server tests before retrying deployment. Server deployment
+outcomes must be recorded separately.
 
 ## Remaining work and exact next steps
 

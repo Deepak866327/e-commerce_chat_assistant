@@ -1,3 +1,4 @@
 # Small offline suite; no inference/model downloads or cloud credentials needed.
 pydantic==2.12.5
 pypdf==6.21.4
+streamlit==1.66.1
