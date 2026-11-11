@@ -3,6 +3,7 @@
 import logging
 
 import streamlit as st
+from src.default_help import starter_faqs
 
 
 logger = logging.getLogger(__name__)
@@ -15,11 +16,11 @@ def render_faq_help(load_articles, send_question):
             articles = load_articles()
         except Exception:
             logger.error("FAQ help center is temporarily unavailable")
-            st.info("Help articles are temporarily unavailable. You can still ask us in chat below.")
-            return
+            st.info("Store-specific articles are temporarily unavailable. You can browse general help below or ask us in chat.")
+            articles = []
         if not articles:
-            st.info("Help articles are being prepared. Ask your question in chat below and we’ll help you.")
-            return
+            articles = starter_faqs()
+            st.caption("General help · Eligibility and timeframes depend on the store’s current policy.")
 
         search = st.text_input("Search help articles", placeholder="Try cancellation, delivery or refund",
                                key="faq_search", max_chars=200).strip().casefold()

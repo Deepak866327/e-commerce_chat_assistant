@@ -97,7 +97,7 @@ class VoiceAppTests(unittest.TestCase):
         self.answer.assert_called_once()
 
     def test_hinglish_selection_reaches_transcription(self):
-        self.app.selectbox[0].select("Hindi / Hinglish").run()
+        next(field for field in self.app.selectbox if field.label == "Speech language").select("Hindi / Hinglish").run()
         self.transcribe_question()
         self.assertEqual(self.transcribe.call_args.kwargs["language"], "hi")
 
@@ -113,9 +113,22 @@ class VoiceAppTests(unittest.TestCase):
         self.app.run()
         self.answer.assert_called_once()
 
-    def test_empty_published_catalog_does_not_show_faq_buttons(self):
-        self.assertTrue(any("being prepared" in item.value for item in self.app.info))
-        self.assertFalse(any(button.label == "I still need help" for button in self.app.button))
+    def test_fresh_deployment_has_searchable_faq_answers_without_model_calls(self):
+        self.assertFalse(any("being prepared" in item.value for item in self.app.info))
+        self.assertEqual(sum(button.label == "I still need help" for button in self.app.button), 6)
+        self.assertTrue(any(item.label == "How can I cancel my order?" for item in self.app.expander))
+        self.assertTrue(any("cancellation option" in item.value for item in self.app.markdown))
+        next(field for field in self.app.text_input if field.label == "Search help articles").set_value("refund").run()
+        self.assertTrue(any(item.label == "My refund has not arrived. What should I check?" for item in self.app.expander))
+        self.assertEqual(self.app.session_state["messages"], [])
+        self.answer.assert_not_called()
+
+    def test_starter_faq_continues_in_chat_once(self):
+        next(button for button in self.app.button if button.key == "faq-help-starter-cancel").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertIn("How can I cancel my order?", self.answer.call_args.args[0])
+        self.app.run()
+        self.answer.assert_called_once()
 
     def test_faq_search_topics_and_publication_refresh_do_not_send_chat(self):
         self.suggestions.return_value = [
@@ -142,6 +155,7 @@ class VoiceAppTests(unittest.TestCase):
         self.app.run()
         self.assertFalse(self.app.exception)
         self.assertTrue(any("temporarily unavailable" in item.value for item in self.app.info))
+        self.assertTrue(any(item.label == "How can I track my order?" for item in self.app.expander))
         self.app.chat_input[0].set_value("Help with my order").run()
         self.answer.assert_called_once()
 

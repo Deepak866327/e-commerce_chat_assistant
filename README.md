@@ -236,6 +236,14 @@ not call a model, create tickets or consume support attempts. **I still need hel
 sends the FAQ topic into the normal chat flow for follow-up assistance. Answers are
 shown in their reviewed language; the chat language selector controls chat replies.
 
+Fresh deployments show six built-in general-help FAQs (orders, delivery, returns,
+refunds, payments and support), with search and topic filters immediately available.
+These explain practical checks without promising store-specific eligibility or
+timelines. The published store catalog replaces this starter catalog once available.
+If the store catalog cannot load, general help remains available with a notice.
+The legacy `data/faqs/faqs.json` file is not automatically published: its policy
+claims still need validation and review against current source documents.
+
 To populate the panel, open **Staff workspace**, generate drafts from current policy
 chunks, review and edit the answers and categories, select **Approve reviewed FAQ**,
 then have an admin select **Publish approved FAQ**. Only reviewed, verified FAQs
