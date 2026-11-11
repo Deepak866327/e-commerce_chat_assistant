@@ -63,6 +63,42 @@ are unchanged. Grounded generation now identifies its prompt as
 
 ## Remaining measured work
 
+### Run against actual Ollama models
+
+The comprehensive runner uses the configured utility, fine-tuned answer and
+verifier models through the real Ollama API. It records their exact digests,
+executes all 24 routing cases, builds a temporary dense/BM25 candidate index from
+the repository policy PDFs, and exercises 10 actual answer/abstention/action cases.
+It saves answers, cited evidence, verification results, failures and timings.
+Only cached embeddings are used; it never downloads replacement model weights,
+activates an index or writes production tickets/data. Reports are checkpointed
+after routing and each answer. Failed infrastructure is exit code 2; failed
+checks are exit code 1; a completed passing development run is exit code 0.
+
+Use an isolated checkout on the server where Ollama and the existing models are
+installed. The existing server virtual environment can run the evaluation without
+replacing the service or its environment:
+
+```bash
+git clone --branch improve-support-resolution https://github.com/Deepak866327/e-commerce_chat_assistant.git shopassist-model-eval
+cd shopassist-model-eval
+/home/ubuntu/shopassist/.venv/bin/python scripts/evaluate_real_models.py --report /tmp/shopassist-real-model-report.json
+```
+
+For another configured Python environment, run
+`python scripts/evaluate_real_models.py --report ../shopassist-real-model-report.json`.
+Defaults are `http://localhost:11434`, answer model `shopassist-finetuned` and
+utility/verifier `qwen2.5:1.5b`, unless corresponding `SHOPASSIST_*` variables override
+them. CLI overrides include `--ollama-url`, `--answer-model`, `--utility-model`,
+`--verifier-model` and `--policies-dir`. Use the existing server environment or
+install `requirements.txt` in a separate evaluation virtual environment.
+
+This is an actual model-backed development smoke test, not a human-reviewed
+correctness benchmark. A passing model-judged grounding result still needs review.
+An unreachable Ollama service or missing model produces an infrastructure error,
+never a passing result. The remote machine/endpoint must be reachable from the
+environment that runs this command; a laptop's localhost is not this workspace.
+
 1. On the model host, run `python scripts/evaluate_support_routes.py --model-backed`.
    Diagnose all 14 real-classifier cases and add observed customer failures.
 2. Human-review the existing policy benchmark drafts and representative English,
