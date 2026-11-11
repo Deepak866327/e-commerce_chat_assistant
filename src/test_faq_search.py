@@ -46,4 +46,3 @@ for question in test_questions:
         print("Distance Score:", round(score, 4))
         print("Metadata:", doc.metadata)
         print("FAQ Content:", doc.page_content)
-
