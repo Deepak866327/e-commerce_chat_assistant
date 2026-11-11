@@ -61,7 +61,7 @@ def inspect_result(case, result):
     return failures
 
 
-def run_checks(settings, policies, report, checkpoint=lambda: None):
+def run_checks(settings, policies, report, checkpoint=lambda: None, support_conversations=False):
     client = OllamaClient(settings)
     report.update(stage="model_preflight", status="running")
     models = {"answer": settings.answer_model, "utility": settings.utility_model, "verifier": settings.verifier_model}
@@ -121,6 +121,35 @@ def run_checks(settings, policies, report, checkpoint=lambda: None):
                 "model_calls": client.calls[call_start:], "seconds": time.perf_counter() - started,
                 "contract_passed": not failures, "failures": failures})
             checkpoint()
+        if support_conversations:
+            from src.rag_memory import _escalate
+            from src.resolution import ResolutionService
+            report["stage"] = "support_conversations"
+            report["support_conversations"] = []
+            scenarios = [("retry_budget", ["Cancel my order", "No"] + ["Still not working"] * (settings.support_max_attempts - 1)),
+                         ("explicit_handoff", ["Please connect me to a human about my refund"])]
+            for name, questions in scenarios:
+                history, turns = [], []
+                session = "development-" + name
+                flow = ResolutionService(store, isolated, session)
+                for question in questions:
+                    print(f"Support conversation {name}: {question}", file=sys.stderr, flush=True)
+                    prepared = flow.prepare(question)
+                    before = len(client.calls)
+                    raw = ({"answer": "", "sources": [], "route": "support_followup", "needs_human_support": False,
+                            "query_id": None, "retrieval_performed": False} if prepared.get("_resolution_direct") else
+                           service.ask(question, history, session, record=False, response_language="en", support_context=prepared))
+                    result = _escalate(question, history, session, raw, "en", prepared, settings=isolated)
+                    turns.append({"question": question, "answer": result["answer"], "resolution": result["resolution"],
+                                  "ticket": result.get("ticket"), "reason": result.get("reason"),
+                                  "model_calls": client.calls[before:]})
+                    history.extend([{"role": "user", "content": question}, {"role": "assistant", "content": result["answer"]}])
+                passed = (bool(turns[-1].get("ticket")) and
+                          (name == "explicit_handoff" or not any(turn.get("ticket") for turn in turns[:-1])
+                           and turns[-1]["resolution"]["attempts"] == settings.support_max_attempts))
+                report["support_conversations"].append({"name": name, "turns": turns, "contract_passed": passed,
+                                                        "tickets_in_temporary_database_only": True})
+                checkpoint()
         # No active index, live tickets or existing workflow state may be changed.
         if store.setting("active_index") is not None:
             raise RuntimeError("Isolated evaluation unexpectedly activated an index")
@@ -133,7 +162,8 @@ def run_checks(settings, policies, report, checkpoint=lambda: None):
                          "answer_contracts_passed": sum(row["contract_passed"] for row in report["answers"]),
                          "answer_cases": len(report["answers"]), "human_reviewed_factual_accuracy": None}
     passed = (report["routing"]["passed"] == report["routing"]["total"]
-              and all(row["contract_passed"] for row in report["answers"]) and report["model_identity_unchanged"])
+              and all(row["contract_passed"] for row in report["answers"]) and report["model_identity_unchanged"]
+              and all(row["contract_passed"] for row in report.get("support_conversations", [])))
     report["stage"] = "completed"
     report["status"] = "checks_passed" if passed else "checks_failed"
     return 0 if passed else 1
@@ -147,6 +177,7 @@ def main(argv=None):
     parser.add_argument("--verifier-model", help="Separate verifier model")
     parser.add_argument("--policies-dir", type=Path, default=ROOT / "data/policies")
     parser.add_argument("--report", type=Path, help="Save actual answers, evidence, timings and failures as JSON")
+    parser.add_argument("--support-conversations", action="store_true", help="Also test retry-budget and explicit handoff conversations in temporary state")
     args = parser.parse_args(argv)
     report = {"started_at": datetime.now(timezone.utc).isoformat(), "status": "not_started", "stage": "settings",
               "scope": "Real-model development smoke test; not human-reviewed factual accuracy or release acceptance",
@@ -164,7 +195,7 @@ def main(argv=None):
         overrides = {name: getattr(args, name) for name in ("ollama_url", "answer_model", "utility_model", "verifier_model") if getattr(args, name)}
         # Reuse cached embeddings only. Provisioning is separate from evaluation.
         settings = replace(settings, **overrides, allow_model_download=False)
-        code = run_checks(settings, args.policies_dir, report, checkpoint=save_report)
+        code = run_checks(settings, args.policies_dir, report, checkpoint=save_report, support_conversations=args.support_conversations)
     except KeyboardInterrupt:
         report["status"] = "interrupted"
         code = 130

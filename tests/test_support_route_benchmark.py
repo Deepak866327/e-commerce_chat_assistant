@@ -13,9 +13,9 @@ class SupportRouteBenchmarkTests(unittest.TestCase):
         cases = json.loads((ROOT / "data/benchmarks/support_routes.json").read_text(encoding="utf-8"))["cases"]
         report = run_cases(cases)
         self.assertEqual(report["total"], 25)
-        self.assertEqual(report["executed"], 17)
-        self.assertEqual(report["passed"], 17)
-        self.assertEqual(report["skipped"], 8)
+        self.assertEqual(report["executed"], 18)
+        self.assertEqual(report["passed"], 18)
+        self.assertEqual(report["skipped"], 7)
         self.assertEqual(report["model_backed_executed"], 0)
 
     def test_wrong_model_route_is_reported_as_failure(self):

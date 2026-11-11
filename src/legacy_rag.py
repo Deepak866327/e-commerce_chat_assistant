@@ -137,7 +137,10 @@ def _initialize():
     13. Distinguish refunds, returns, exchanges and order cancellations.
     14. For refund questions, use refund evidence. Cancellation rules alone
         do not establish refund eligibility, procedure or timing.
-    15. If the context does not answer the question, say verified policy
+    15. Use customer-reported details to address the original issue, including short
+        follow-up replies. Do not repeat guidance already tried. Do not ask questions
+        or claim a support ticket was created; the support flow manages the next step.
+    16. If the context does not answer the question, say verified policy
         information is unavailable instead of inferring an answer.
 
     EXAMPLE:
@@ -224,7 +227,7 @@ def _initialize():
 
     return db, scope_chain, rewrite_chain, answer_chain, OUT_OF_SCOPE_REPLY
 
-def ask_shopassist(question, chat_history, *, intent_checked=False, response_language="hinglish"):
+def ask_shopassist(question, chat_history, *, intent_checked=False, response_language="hinglish", search_question=None):
     language_instruction(response_language)
     db, scope_chain, rewrite_chain, answer_chain, OUT_OF_SCOPE_REPLY = _initialize()
     chat_history = chat_history[-MAX_HISTORY_MESSAGES:]

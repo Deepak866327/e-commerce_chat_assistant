@@ -214,7 +214,17 @@ staff workspace in the existing Streamlit app. Support staff can respond to tick
 reviewers can review FAQ drafts; administrators can queue generation and publish
 approved FAQs. SQLite holds workflow state; Chroma still holds vectors.
 
-Unresolved support answers and explicit human requests create a ticket. Customers
+The bot first asks a relevant follow-up or gives evidence-based guidance and
+checks whether it helped. It tracks each issue across turns, avoids repeating
+questions/steps, and escalates after three unsuccessful support cycles. Set
+`SHOPASSIST_SUPPORT_MAX_ATTEMPTS=2` for a two-attempt budget. These are customer
+support attempts, not the model's internal generation retries. A reply to a
+requested detail is used before declaring that attempt unsuccessful.
+
+Explicit human requests create a ticket immediately. Greetings and thanks do not
+consume the budget; a new issue or **Clear conversation** resets it. Resolution
+requires customer confirmation. See [the support flow](docs/RESOLUTION_FLOW.md).
+Customers
 can also use **Talk to a human** and check **Your support tickets** in the sidebar.
 Replies are available in the current browser session; click **Refresh ticket** to
 check for a staff response. Optional contact details require a configured encryption

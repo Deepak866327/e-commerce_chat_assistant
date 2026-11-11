@@ -52,7 +52,10 @@ Never answer a policy question in this step. Return the intent only.
 """
 
 
-def classify_query(client, model, question, history):
+def classify_query(client, model, question, history, *, support_context=None):
+    from src.resolution import contextual_search
+    if contextual_search(support_context):
+        return "KNOWLEDGE"
     intent = deterministic_intent(question)
     if intent is not None:
         return intent

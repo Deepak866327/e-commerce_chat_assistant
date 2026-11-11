@@ -9,13 +9,14 @@ from uuid import uuid4
 from src.ollama_client import InvalidModelOutput, ModelUnavailable
 from src.conversation import conversational_reply
 from src.schemas import Answer, Rewrite
+from src.resolution import contextual_search
 from src.language import message, language_instruction
 from src.query_routing import classify_query, response_without_retrieval
 from src.security import rate_limit, redact, suspicious
 from src.verification import numbers, validate_citations
 
 logger = logging.getLogger(__name__)
-PROMPT_VERSION = "shopassist-grounded-v3"
+PROMPT_VERSION = "shopassist-grounded-v4"
 MAX_HISTORY_MESSAGES = 8
 ABSTENTION = ("Mere paas iski verified policy information nahi hai. "
               "Aap human support team se madad le sakte hain.")
@@ -35,7 +36,10 @@ Distinguish an active customer problem from a general policy question. Answer th
 requested next step, not just a related FAQ or timeline. Preserve what the customer says has
 already happened; do not ask them to repeat details in history. Never treat their reported
 account status as independently verified. Do not describe a complaint as resolved unless the
-customer confirms it. Human support is available through this chat's ticket queue.
+customer confirms it. Human support is available through this chat's ticket queue. Try to solve the current issue using
+reported details and approved evidence. Do not repeat guidance already tried. Do not ask follow-up
+questions or say a ticket was created: the support flow adds one next question or performs handoff.
+If the latest message is a short answer, use reported context to address the original issue.
 """
 
 
@@ -64,8 +68,12 @@ def history_messages(history, support_context=None):
         if context["customer_reported"]:
             # Extra memory has its own byte budget and keeps the original issue.
             while len(json.dumps(context, ensure_ascii=False).encode("utf-8")) > 1500:
-                if context["steps_tried"]:
+                if context["assistant_attempts"]:
+                    context["assistant_attempts"].pop(0)
+                elif context["steps_tried"]:
                     context["steps_tried"].pop(0)
+                elif context["reported_facts"]:
+                    context["reported_facts"].popitem()
                 elif len(context["customer_reported"]) > 1:
                     context["customer_reported"].pop(1)
                 else:
@@ -108,7 +116,8 @@ class ChatService:
         history = history_messages(history, support_context)
         retrieval = {"chunks": [], "candidates": [], "retrieval_seconds": 0, "reranking_seconds": 0}
         verification = {"passed": False, "reason": "not_run", "evidence_coverage": 0.0}
-        search_query = safe_question
+        context_query = contextual_search(support_context)
+        search_query = context_query or safe_question
         error = None
         conversation = conversational_reply(question, response_language)
         route = conversation["route"] if conversation else "undetermined"
@@ -126,7 +135,7 @@ class ChatService:
                 route = "blocked"
                 answer = abstain("unsafe_request")
             else:
-                intent = classify_query(self.client, self.settings.utility_model, safe_question, history)
+                intent = classify_query(self.client, self.settings.utility_model, safe_question, history, support_context=support_context)
                 route = intent.lower()
                 retrieval_required = intent == "KNOWLEDGE"
                 routed_answer = response_without_retrieval(intent, question, response_language, support_context)
@@ -137,7 +146,7 @@ class ChatService:
                 elif not self.retriever.corpus():
                     answer = abstain("no_validated_knowledge")
                 else:
-                    if history:
+                    if history and not context_query:
                         try:
                             rewrite = self.client.structured(self.settings.utility_model, [
                                 {"role": "system", "content": "Rewrite only to resolve references in a follow-up. Preserve intent, "
@@ -150,7 +159,7 @@ class ChatService:
                             search_query = safe_question
                     retrieval_performed = True
                     retrieval = self.retriever.search(search_query, hybrid=hybrid, rerank=rerank)
-                    if search_query != safe_question:
+                    if search_query != safe_question and not context_query:
                         # Fuse original intent and resolved context without dropping
                         # either query's evidence or overwriting source metadata.
                         original = self.retriever.search(safe_question, hybrid=hybrid, rerank=rerank)

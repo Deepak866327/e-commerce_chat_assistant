@@ -5,7 +5,7 @@ from uuid import uuid4
 import streamlit as st
 from src.config import Settings
 from src.support_context import remember_customer, remember_result
-from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist, submit_feedback, faq_suggestions
+from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist, submit_feedback, faq_suggestions, reset_support_resolution
 from src.speech_controls import speech_controls_html
 from src.voice import MAX_AUDIO_SECONDS, SAMPLE_RATE, SpeechInputError, transcribe_recording
 from src.support_ui import remember_ticket, render_customer_support, render_staff_workspace
@@ -22,6 +22,7 @@ def reset_voice_input():
 
 
 def clear_conversation():
+    reset_support_resolution(st.session_state.support_session)
     st.session_state.messages = []
     st.session_state.chat_history = []
     st.session_state.support_context = {}

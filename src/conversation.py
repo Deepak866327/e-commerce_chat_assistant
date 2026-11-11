@@ -60,7 +60,7 @@ def conversational_reply(question, response_language="hinglish"):
     answer = message(key, response_language)
     return {"answer": answer, "answerable": route != "human_support", "sources": [], "citations": [],
             "needs_human_support": route == "human_support",
-            "reason": "explicit_handoff" if route == "human_support" else None, "route": route,
+            "reason": "explicit_handoff" if route == "human_support" else "handoff_declined" if reply_key == "declined_handoff" else None, "route": route,
             "retrieval_required": False, "retrieval_performed": False,
             "search_query": "", "query_id": None, "confidence": None,
             "verification": {"passed": None, "reason": "non_factual_conversation"},

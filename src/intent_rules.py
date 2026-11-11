@@ -10,10 +10,26 @@ import unicodedata
 from src.security import suspicious
 
 
+def explicit_handoff(question):
+    text = " ".join(unicodedata.normalize("NFKC", question).casefold().split())
+    if suspicious(text) or re.search(r"\b(?:not|don't|don’t|no|never|nahi|nahin)\b|नहीं", text):
+        return False
+    return bool(re.search(r"(?:^|[.!?;]\s*)(?:please )?(?:(?:can|could|would|will) (?:you|i) )?"
+                          r"(?:connect me (?:to|with)|(?:talk|speak) to|i (?:want|need|would like) (?:a|an)|i (?:want|need|would like) to (?:talk|speak) to) "
+                          r"(?:a |an |the )?(?:human|(?:support |customer support )?agent|support team)\b|"
+                          r"(?:^|[.!?;]\s*)(?:please )?(?:raise|create|open) (?:a |the )?(?:support )?ticket\b|"
+                          r"(?:^|[.!?;]\s*)(?:please )?escalate(?: (?:this|my issue|my request))? to (?:a |an |the )?(?:human|agent|support team)\b|"
+                          r"^(?:i need|i want|get me) (?:a |an )?(?:human|support agent)\b|"
+                          r"mujhe.*(?:agent|customer care|human).*baat karni|"
+                          r"मुझे.*(?:एजेंट|मानव|कस्टमर केयर).*बात करनी", text))
+
+
 def deterministic_intent(question):
     if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000 or suspicious(question):
         return None
     text = " ".join(unicodedata.normalize("NFKC", question).casefold().split())
+    if explicit_handoff(question):
+        return "HUMAN_SUPPORT"
     text = re.sub(r"^(?:hi|hello|hey|namaste)[,!:.\s]+", "", text)
     if re.search(r"\b(?:python|javascript|programming|api|function)\b", text):
         return None

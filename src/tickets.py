@@ -12,7 +12,7 @@ from src.store import encode, now
 
 STATUSES = {"OPEN", "ASSIGNED", "IN_PROGRESS", "WAITING_ON_CUSTOMER", "RESOLVED", "CLOSED"}
 TERMINAL = {"RESOLVED", "CLOSED"}
-ESCALATION_REASONS = {"explicit_handoff", "account_access_required", "no_validated_knowledge",
+ESCALATION_REASONS = {"explicit_handoff", "resolution_attempts_exhausted", "account_access_required", "no_validated_knowledge",
     "insufficient_retrieval", "insufficient_evidence", "verification_failed", "invalid_model_output",
     "intent_filter_unavailable", "model_unavailable", "service_unavailable", "index_unavailable",
     "source_changed_during_generation", "generation_failed", "user_requested", "legacy_unanswered"}
@@ -70,12 +70,14 @@ class TicketService:
         session_hash = self._session(session)
         from src.support_context import clean_context
         context = clean_context(result.get("support_context"))
-        if context["ticket_reference"] and result.get("route") == "account_action":
+        if context["ticket_reference"] and result.get("route") in {"account_action", "human_support", "handoff"}:
             previous = self._owned(context["ticket_reference"], session)
             if previous["status"] not in TERMINAL:
                 self.reply(previous["reference"], question, session=session)
                 return self.summary(previous)
-        dedupe = sha256(" ".join(question.casefold().split()).encode()).hexdigest()
+        issue_id = result.get("resolution", {}).get("issue_id")
+        dedupe_text = "resolution:" + issue_id if isinstance(issue_id, str) and re.fullmatch(r"ISSUE_[a-f0-9]{32}", issue_id) else " ".join(question.casefold().split())
+        dedupe = sha256(dedupe_text.encode()).hexdigest()
         existing = self.store.rows("SELECT * FROM tickets WHERE session_hash=? AND dedupe_key=? AND closed_at IS NULL", (session_hash, dedupe))
         if existing:
             return self.summary(existing[0])
@@ -85,7 +87,7 @@ class TicketService:
         payload = redact_value({"question": question, "last_answer": result.get("answer", ""),
             "history": history[-8:], "sources": result.get("citations", result.get("sources", [])),
             "route": result.get("route"), "verification": result.get("verification"),
-            "customer_reported_context": context})
+            "customer_reported_context": context, "resolution_summary": result.get("resolution_summary", {})})
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute("SELECT * FROM tickets WHERE session_hash=? AND dedupe_key=? AND closed_at IS NULL", (session_hash, dedupe)).fetchone()

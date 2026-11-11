@@ -37,6 +37,10 @@ ticket workspace. This continuation preserves those implementations.
    Offline execution reports model cases as skipped, not passed. This set stays
    separate from production FAQs and human-reviewed release evaluation data.
 
+7. The [resolution flow](RESOLUTION_FLOW.md) now tries targeted follow-ups and supported
+   guidance before automatic escalation after three unsuccessful support cycles.
+   Explicit human requests bypass the budget; state is persisted per issue.
+
 ## Validation and limits
 
 Commands:
@@ -50,8 +54,8 @@ python scripts/evaluate_support_routes.py
 ```
 
 Baseline: 76 offline tests passed on the current upstream source. Final executed
-results are recorded in the pull request. The route fixture has 17 deterministic
-conversation/procedure cases and 8 model cases. Tests also exercise real SQLite operations,
+results are recorded in the pull request. The route fixture has 18 deterministic
+conversation/procedure cases and 7 model cases. Tests also exercise real SQLite operations,
 source ingestion and Streamlit UI behavior using simulated inference.
 
 Local Ollama is unavailable and the external fine-tuned GGUF is absent. Prompt
@@ -59,7 +63,7 @@ changes, actual multilingual generation, retrieval quality and customer resoluti
 rates are not measured by these offline checks. No live deployment was performed.
 Existing production configuration, weights, index activation and release gates
 are unchanged. Grounded generation now identifies its prompt as
-`shopassist-grounded-v3`; rerun measured acceptance before activating it.
+`shopassist-grounded-v4`; rerun measured acceptance before activating it.
 
 ## Remaining measured work
 
@@ -100,7 +104,7 @@ never a passing result. The remote machine/endpoint must be reachable from the
 environment that runs this command; a laptop's localhost is not this workspace.
 
 1. On the model host, run `python scripts/evaluate_support_routes.py --model-backed`.
-   Diagnose all 8 real-classifier cases and add observed customer failures.
+   Diagnose all 7 real-classifier cases and add observed customer failures.
 2. Human-review the existing policy benchmark drafts and representative English,
    Hindi and Hinglish examples; keep held-out evaluation separate from training.
 3. Use the existing A–E/embedding/chunk experiments and release gates to measure

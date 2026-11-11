@@ -29,6 +29,7 @@ class SupportUITests(unittest.TestCase):
         pipeline.MAX_HISTORY_MESSAGES = 8
         self.answer = pipeline.ask_shopassist = Mock(return_value={"answer": "Hello", "sources": []})
         pipeline.submit_feedback = Mock()
+        pipeline.reset_support_resolution = Mock()
         pipeline.faq_suggestions = Mock(return_value=[])
         pipeline.request_human_support = Mock(side_effect=lambda q, h, s: self.tickets.open(q, {}, h, s))
         self.stack.enter_context(patch.dict("sys.modules", {"src.rag_memory": pipeline}))

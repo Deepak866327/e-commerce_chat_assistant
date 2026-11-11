@@ -24,10 +24,17 @@ def clean_context(context):
                 if isinstance(value, str) and value.strip() and not suspicious(value)]
     reference = context.get("ticket_reference")
     topic = context.get("issue_type")
+    facts = context.get("reported_facts", {})
+    facts = {key: redact(value)[:300] for key, value in facts.items()
+             if key in {"dispatch_status", "refund_approval", "approval_date", "payment_error", "charged_status",
+                        "tracking_update", "expected_delivery", "item_problem", "delivery_date", "product_problem",
+                        "purchase_date", "steps_attempted", "blocker", "issue_details"}
+             and isinstance(value, str) and not suspicious(value)} if isinstance(facts, dict) else {}
     return {"issue_type": topic if isinstance(topic, str) and topic in TOPICS else None,
             "customer_reported": reports("customer_reported"), "steps_tried": reports("steps_tried"),
             "resolution": "customer_reported_resolved" if context.get("resolution") == "customer_reported_resolved" else "unknown",
-            "ticket_reference": reference if isinstance(reference, str) and re.fullmatch(r"SA-[A-F0-9]{16}", reference) else None}
+            "ticket_reference": reference if isinstance(reference, str) and re.fullmatch(r"SA-[A-F0-9]{16}", reference) else None,
+            "reported_facts": facts, "assistant_attempts": reports("assistant_attempts")[-3:]}
 
 
 def remember_customer(context, question):
@@ -58,7 +65,7 @@ def remember_customer(context, question):
 
 
 def remember_result(context, result):
-    state = clean_context(context)
+    state = clean_context(result.get("support_context") or context)
     ticket = result.get("ticket") or {}
     if ticket.get("reference"):
         state["ticket_reference"] = ticket["reference"]

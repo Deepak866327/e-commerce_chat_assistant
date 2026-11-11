@@ -44,6 +44,7 @@ class Settings:
     pipeline: str = "grounded"
     ticket_encryption_key: str = field(default="", repr=False)
     ticket_retention_days: int = 90
+    support_max_attempts: int = 3
 
     def __post_init__(self):
         if self.pipeline not in {"grounded", "legacy"}:
@@ -57,6 +58,8 @@ class Settings:
                 raise ValueError(f"{name} must be positive")
         if self.model_timeout <= 0 or not 0 <= self.min_dense_similarity <= 1:
             raise ValueError("Invalid timeout or similarity threshold")
+        if self.support_max_attempts not in {2, 3}:
+            raise ValueError("support_max_attempts must be 2 or 3")
 
     @classmethod
     def from_env(cls):

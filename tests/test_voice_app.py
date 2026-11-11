@@ -25,6 +25,7 @@ class VoiceAppTests(unittest.TestCase):
         })
         pipeline.ask_shopassist = self.answer
         pipeline.submit_feedback = Mock()
+        pipeline.reset_support_resolution = Mock()
         self.suggestions = Mock(return_value=[])
         pipeline.faq_suggestions = self.suggestions
         self.stack.enter_context(patch.dict("sys.modules", {"src.rag_memory": pipeline}))

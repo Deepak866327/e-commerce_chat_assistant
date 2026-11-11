@@ -93,7 +93,7 @@ class QueryRoutingTests(unittest.TestCase):
                  patch("src.rag_memory.classify_query", return_value=intent), \
                  patch.dict("sys.modules", {"src.legacy_rag": legacy}):
                 result = ask_shopassist("An arbitrary routed customer message", [], "routing-tests")
-                self.assertEqual(result["route"], intent.lower())
+                self.assertEqual(result["route"], "support_followup" if intent == "ACCOUNT_ACTION" else intent.lower())
                 self.assertFalse(result["retrieval_performed"])
                 self.assertEqual(result["sources"], [])
                 legacy.ask_shopassist.assert_not_called()
@@ -111,9 +111,9 @@ class QueryRoutingTests(unittest.TestCase):
             result = ask_shopassist("And express?", history, "routing-tests")
             self.assertTrue(result["retrieval_performed"])
             self.assertTrue(result["sources"])
-            self.assertEqual(classify.call_args.args[-1], history)
+            self.assertEqual(classify.call_args.args[-1][-len(history):], history)
             self.assertTrue(legacy.ask_shopassist.call_args.kwargs["intent_checked"])
-            self.assertEqual(legacy.ask_shopassist.call_args.args[1][0].content, history[0]["content"])
+            self.assertEqual(legacy.ask_shopassist.call_args.args[1][-1].content, history[0]["content"])
 
     def test_filter_failure_does_not_trigger_retrieval(self):
         from src.rag_memory import ask_shopassist
@@ -123,7 +123,8 @@ class QueryRoutingTests(unittest.TestCase):
              patch("src.rag_memory.classify_query", side_effect=ModelUnavailable("offline")), \
              patch.dict("sys.modules", {"src.legacy_rag": legacy}):
             result = ask_shopassist("A question that needs routing", [], "routing-tests")
-            self.assertEqual(result["reason"], "intent_filter_unavailable")
+            self.assertEqual(result["failure_reason"], "intent_filter_unavailable")
+            self.assertNotIn("ticket", result)
             self.assertFalse(result["retrieval_performed"])
             legacy.ask_shopassist.assert_not_called()
 
