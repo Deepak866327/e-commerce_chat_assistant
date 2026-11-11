@@ -29,10 +29,19 @@ def requires_ticket(result):
     text = " ".join(result.get("answer", "").casefold().replace("’", "'").split())
     # Legacy generation is plain text. Recognize its explicit inability to help,
     # not policy prohibitions such as 'you cannot return a used product'.
-    return any(phrase in text for phrase in ("verified policy information nahi", "i don't know",
+    if any(phrase in text for phrase in ("verified policy information nahi", "i don't know",
         "i do not know", "i don't have access", "i do not have access", "i don't have enough information",
         "i do not have enough information", "mere paas account access nahi", "mere paas access nahi",
-        "verified information nahi", "policy information available nahi", "जानकारी नहीं है"))
+        "verified information nahi", "policy information available nahi", "जानकारी नहीं है")):
+        # A live-access disclaimer alone does not invalidate a sourced policy
+        # answer. Explicit abstention/uncertainty must still be escalated.
+        policy_unknown = any(phrase in text for phrase in ("verified policy information nahi", "i don't know",
+            "i do not know", "i don't have enough information", "i do not have enough information",
+            "verified information nahi", "policy information available nahi", "जानकारी नहीं है"))
+        guidance = re.search(r"\byou (?:can|may|should)\b|\bfollow (?:the|these)\b|\bbefore dispatch\b|"
+                             r"aap.*(?:kar sakte|follow)|dispatch.*pehle|आप.*(?:कर सकते|करें)", text)
+        return policy_unknown or not (result.get("route") == "knowledge" and result.get("sources") and guidance)
+    return False
 
 
 class TicketService:
