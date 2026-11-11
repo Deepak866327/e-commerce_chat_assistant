@@ -45,6 +45,8 @@ Examples:
 'mujhe customer care se baat karni hai' -> HUMAN_SUPPORT
 'I do not want an agent; explain your return policy' -> KNOWLEDGE
 'My refund is 20 days overdue. Please expedite it.' -> ACCOUNT_ACTION
+A short reply supplying details requested for an unresolved account issue stays ACCOUNT_ACTION,
+so it can be added to the existing support request. Customer-reported context is not verified account data.
 Never answer a policy question in this step. Return the intent only.
 """
 
@@ -54,9 +56,17 @@ def classify_query(client, model, question, history):
                                    *history, {"role": "user", "content": question}], QueryIntent, num_ctx=2048).intent
 
 
-def account_action_reply(question, response_language="hinglish"):
+def account_action_reply(question, response_language="hinglish", support_context=None):
     """Gather one useful detail without claiming live access or guessing a policy."""
+    from src.support_context import clean_context
+    context = clean_context(support_context)
+    if context["ticket_reference"]:
+        return message("account_followup", response_language)
     normalized = question.casefold()
+    if context["issue_type"]:
+        normalized += " " + {"cancellation": "cancel", "delivery": "tracking"}.get(context["issue_type"], context["issue_type"])
+    if re.search(r"refund|रिफंड", normalized) and re.search(r"approv|मंज़ूर|मंजूर", normalized):
+        return message("account_followup", response_language)
     for pattern, key in ((r"refund|रिफंड|पैसे वापस", "account_refund"),
                          (r"cancel|कैंसल|रद्द", "account_cancel"),
                          (r"payment|transaction|paid|debited|paisa|paise|पेम[ेै]ंट|भुगतान|पैसे", "account_payment"),
@@ -66,7 +76,7 @@ def account_action_reply(question, response_language="hinglish"):
     return message("account_generic", response_language)
 
 
-def response_without_retrieval(intent, question="", response_language="hinglish"):
+def response_without_retrieval(intent, question="", response_language="hinglish", support_context=None):
     language_instruction(response_language)
     responses = {
         "CONVERSATION": ("capabilities", True, False, None),
@@ -80,5 +90,5 @@ def response_without_retrieval(intent, question="", response_language="hinglish"
     if intent not in responses:
         raise ValueError("Unknown query intent")
     key, answerable, escalate, reason = responses[intent]
-    answer = message(key, response_language) if key else account_action_reply(question, response_language)
+    answer = message(key, response_language) if key else account_action_reply(question, response_language, support_context)
     return Answer(answer=answer, answerable=answerable, sources=[], needs_human_support=escalate, reason=reason)

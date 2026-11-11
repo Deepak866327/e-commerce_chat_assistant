@@ -82,6 +82,7 @@ class VoiceAppTests(unittest.TestCase):
         self.assertEqual(self.app.session_state["chat_history"], [])
         self.assertEqual(self.app.session_state["voice_transcript"], "")
         self.assertGreater(self.app.session_state["voice_generation"], previous_generation)
+        self.assertEqual(self.app.session_state["support_context"], {})
         self.answer.assert_not_called()
 
     def test_silence_warns_without_sending_a_question(self):

@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import streamlit as st
 from src.config import Settings
+from src.support_context import remember_customer, remember_result
 from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist, submit_feedback, faq_suggestions
 from src.speech_controls import speech_controls_html
 from src.voice import MAX_AUDIO_SECONDS, SAMPLE_RATE, SpeechInputError, transcribe_recording
@@ -23,6 +24,7 @@ def reset_voice_input():
 def clear_conversation():
     st.session_state.messages = []
     st.session_state.chat_history = []
+    st.session_state.support_context = {}
     st.session_state.pop("pending_voice_question", None)
     st.session_state.pop("pending_faq_question", None)
     reset_voice_input()
@@ -147,6 +149,7 @@ def main():
         "voice_feedback": None,
         "support_session": uuid4().hex,
         "support_tickets": [],
+        "support_context": {},
     }
     for name, value in defaults.items():
         st.session_state.setdefault(name, value)
@@ -197,17 +200,19 @@ def main():
         return
     question = question.strip()
 
+    pending_context = remember_customer(st.session_state.support_context, question)
     user_message = {"role": "user", "content": question}
     render_message(user_message, len(st.session_state.messages))
     try:
         with st.spinner("ShopAssist is thinking..."):
             result = ask_shopassist(question, st.session_state.chat_history, st.session_state.support_session,
-                                    response_language=response_language)
+                                    response_language=response_language, support_context=pending_context)
     except Exception:
         logger.error("Chat request failed")
         st.error("Support is temporarily unavailable. Please try again shortly.")
         return
 
+    st.session_state.support_context = remember_result(pending_context, result)
     assistant_message = {
         "role": "assistant",
         "content": result["answer"],

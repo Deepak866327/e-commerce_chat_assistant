@@ -39,7 +39,7 @@ customer confirms it. Human support is available through this chat's ticket queu
 """
 
 
-def history_messages(history):
+def history_messages(history, support_context=None):
     messages = []
     for message in list(history or [])[-MAX_HISTORY_MESSAGES:]:
         if isinstance(message, dict):
@@ -57,7 +57,22 @@ def history_messages(history):
             break
         bounded.append(message)
         used += cost
-    return list(reversed(bounded))
+    result = list(reversed(bounded))
+    if support_context:
+        from src.support_context import clean_context
+        context = clean_context(support_context)
+        if context["customer_reported"]:
+            # Extra memory has its own byte budget and keeps the original issue.
+            while len(json.dumps(context, ensure_ascii=False).encode("utf-8")) > 1500:
+                if context["steps_tried"]:
+                    context["steps_tried"].pop(0)
+                elif len(context["customer_reported"]) > 1:
+                    context["customer_reported"].pop(1)
+                else:
+                    context["customer_reported"][0] = context["customer_reported"][0][:100]
+            result.insert(0, {"role": "user", "content": json.dumps(
+                {"customer_reported_context_not_verified": context}, ensure_ascii=False)})
+    return result
 
 
 def safe_rewrite(original, rewritten, history):
@@ -81,7 +96,7 @@ class ChatService:
     def abstain(reason, response_language="hinglish"):
         return Answer(answer=message("abstention", response_language), answerable=False, sources=[], needs_human_support=True, reason=reason)
 
-    def ask(self, question, history=None, session="local", *, verify=True, hybrid=True, rerank=True, record=True, response_language="hinglish"):
+    def ask(self, question, history=None, session="local", *, verify=True, hybrid=True, rerank=True, record=True, response_language="hinglish", support_context=None):
         language_instruction(response_language)
         abstain = lambda reason: self.abstain(reason, response_language)
         started = time.perf_counter()
@@ -90,7 +105,7 @@ class ChatService:
             raise ValueError("Question must contain 1–2000 characters")
         question = question.strip()
         safe_question = redact(question)
-        history = history_messages(history)
+        history = history_messages(history, support_context)
         retrieval = {"chunks": [], "candidates": [], "retrieval_seconds": 0, "reranking_seconds": 0}
         verification = {"passed": False, "reason": "not_run", "evidence_coverage": 0.0}
         search_query = safe_question
@@ -114,7 +129,7 @@ class ChatService:
                 intent = classify_query(self.client, self.settings.utility_model, safe_question, history)
                 route = intent.lower()
                 retrieval_required = intent == "KNOWLEDGE"
-                routed_answer = response_without_retrieval(intent, question, response_language)
+                routed_answer = response_without_retrieval(intent, question, response_language, support_context)
                 if routed_answer is not None:
                     answer = routed_answer
                     verification = {"passed": None, "reason": "no_policy_answer_generated", "evidence_coverage": None}

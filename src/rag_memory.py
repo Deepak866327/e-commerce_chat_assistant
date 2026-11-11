@@ -37,13 +37,15 @@ def runtime():
                        GroundingVerifier(client, settings.verifier_model), monitor)
 
 
-def _escalate(question, history, session, result, response_language="hinglish"):
+def _escalate(question, history, session, result, response_language="hinglish", support_context=None):
     from src.chat_service import history_messages
     from src.tickets import TicketService, requires_ticket
     if result.get("ticket") or not requires_ticket(result):
         return result
     result["needs_human_support"] = True
     reason = result.get("reason") or "legacy_unanswered"
+    from src.support_context import clean_context
+    result["support_context"] = clean_context(support_context)
     try:
         settings = Settings.from_env()
         store = Store(settings.state_dir / "control.sqlite3")
@@ -56,7 +58,7 @@ def _escalate(question, history, session, result, response_language="hinglish"):
     return result
 
 
-def _conversation(question, session, history=None, response_language="hinglish"):
+def _conversation(question, session, history=None, response_language="hinglish", support_context=None):
     started = time.perf_counter()
     reply = conversational_reply(question, response_language)
     if reply is None:
@@ -70,36 +72,36 @@ def _conversation(question, session, history=None, response_language="hinglish")
         reply["query_id"] = Monitor(store, settings).trace(session, {"question": question, **reply})
     except Exception as exc:
         logger.error("Conversation trace failed: %s", type(exc).__name__)
-    return _escalate(question, history, session, reply, response_language)
+    return _escalate(question, history, session, reply, response_language, support_context)
 
 
-def ask_structured(question, chat_history=None, session="local", *, response_language="hinglish"):
+def ask_structured(question, chat_history=None, session="local", *, response_language="hinglish", support_context=None):
     """Public structured contract. Citation sources are verified objects."""
     if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000:
         raise ValueError("Question must contain 1–2000 characters")
     language_instruction(response_language)
     question = question.strip()
-    reply = _conversation(question, session, chat_history, response_language)
+    reply = _conversation(question, session, chat_history, response_language, support_context)
     if reply is not None:
         return reply
     try:
         return _escalate(question, chat_history, session, runtime().ask(
-            question, chat_history, session, response_language=response_language), response_language)
+            question, chat_history, session, response_language=response_language, support_context=support_context), response_language, support_context)
     except IndexUnavailable:
         # Keep the UI operational when models/indexes need installation. Do not
         # serve a different model/dimension behind the active collection name.
         return _escalate(question, chat_history, session, {"answer": message("abstention", response_language), "answerable": False, "sources": [],
                 "needs_human_support": True, "reason": "index_unavailable", "search_query": question,
-                "query_id": None, "verification": {"passed": False}, "confidence": None}, response_language)
+                "query_id": None, "verification": {"passed": False}, "confidence": None}, response_language, support_context)
 
 
-def ask_shopassist(question, chat_history, session="local", *, response_language="hinglish"):
+def ask_shopassist(question, chat_history, session="local", *, response_language="hinglish", support_context=None):
     """Preserve answer/search_query/display-source keys used by existing callers."""
     if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000:
         raise ValueError("Question must contain 1–2000 characters")
     language_instruction(response_language)
     question = question.strip()
-    reply = _conversation(question, session, chat_history, response_language)
+    reply = _conversation(question, session, chat_history, response_language, support_context)
     if reply is not None:
         return reply
     settings = Settings.from_env()
@@ -109,7 +111,9 @@ def ask_shopassist(question, chat_history, session="local", *, response_language
         # This mode makes no upgraded-grounding or verified-citation claim.
         from src.chat_service import history_messages
         from src.security import rate_limit, redact, suspicious
-        history = history_messages(chat_history)
+        history = history_messages(chat_history, support_context)
+        if support_context and len(history) > MAX_HISTORY_MESSAGES:
+            history = [history[0], *history[-(MAX_HISTORY_MESSAGES - 1):]]
         store = Store(settings.state_dir / "control.sqlite3")
         monitor = Monitor(store, settings)
         rate_limit(store, session, settings.requests_per_minute)
@@ -122,7 +126,7 @@ def ask_shopassist(question, chat_history, session="local", *, response_language
             from src.ollama_client import InvalidModelOutput, ModelUnavailable
             try:
                 intent = classify_query(client, settings.utility_model, redact(question), history)
-                answer = response_without_retrieval(intent, question, response_language)
+                answer = response_without_retrieval(intent, question, response_language, support_context)
             except (InvalidModelOutput, ModelUnavailable):
                 # An unavailable filter must not trigger blind retrieval.
                 intent = "UNAVAILABLE"
@@ -147,8 +151,8 @@ def ask_shopassist(question, chat_history, session="local", *, response_language
                           "retrieval_required": True, "retrieval_performed": None}
         result.update(pipeline="legacy", confidence=None, latency_seconds=time.perf_counter() - started)
         result["query_id"] = monitor.trace(session, {"question": question, **result})
-        return _escalate(question, chat_history, session, result, response_language)
-    result = ask_structured(question, chat_history, session, response_language=response_language)
+        return _escalate(question, chat_history, session, result, response_language, support_context)
+    result = ask_structured(question, chat_history, session, response_language=response_language, support_context=support_context)
     citations = result["sources"]
     filenames = {c["id"]: c["metadata"].get("source", c["metadata"]["document_id"])
                  for c in result.get("retrieved_chunks", [])}

@@ -59,6 +59,13 @@ class TicketService:
         if not isinstance(question, str) or not question.strip() or len(question) > 2000:
             raise ValueError("Describe the issue in 1–2000 characters")
         session_hash = self._session(session)
+        from src.support_context import clean_context
+        context = clean_context(result.get("support_context"))
+        if context["ticket_reference"] and result.get("route") == "account_action":
+            previous = self._owned(context["ticket_reference"], session)
+            if previous["status"] not in TERMINAL:
+                self.reply(previous["reference"], question, session=session)
+                return self.summary(previous)
         dedupe = sha256(" ".join(question.casefold().split()).encode()).hexdigest()
         existing = self.store.rows("SELECT * FROM tickets WHERE session_hash=? AND dedupe_key=? AND closed_at IS NULL", (session_hash, dedupe))
         if existing:
@@ -68,7 +75,8 @@ class TicketService:
         ticket_id, reference = "TKT_" + uuid4().hex, "SA-" + secrets.token_hex(8).upper()
         payload = redact_value({"question": question, "last_answer": result.get("answer", ""),
             "history": history[-8:], "sources": result.get("citations", result.get("sources", [])),
-            "route": result.get("route"), "verification": result.get("verification")})
+            "route": result.get("route"), "verification": result.get("verification"),
+            "customer_reported_context": context})
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute("SELECT * FROM tickets WHERE session_hash=? AND dedupe_key=? AND closed_at IS NULL", (session_hash, dedupe)).fetchone()
