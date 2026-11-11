@@ -36,10 +36,11 @@ def remember_customer(context, question):
         return state
     normalized = " ".join(question.casefold().split()).rstrip(".!")
     topic = next((name for name, pattern in TOPICS.items() if re.search(pattern, normalized)), None)
+    new_issue = bool(re.search(r"\b(?:new (?:issue|problem|order|purchase)|another (?:refund|order|issue)|different (?:order|issue))\b", normalized))
     # General order mentions must not overwrite a more specific active issue.
-    if topic == "delivery" and state["issue_type"] and not re.search(r"delivery|tracking|package|parcel|डिलीवरी|पार्सल", normalized):
+    if topic == "delivery" and state["issue_type"] and not new_issue and not re.search(r"delivery|tracking|package|parcel|डिलीवरी|पार्सल", normalized):
         topic = state["issue_type"]
-    if topic and topic != state["issue_type"]:
+    if topic and (topic != state["issue_type"] or new_issue or state["resolution"] == "customer_reported_resolved"):
         state = clean_context({"issue_type": topic})
     if state["issue_type"] and normalized:
         report = redact(question[:300])

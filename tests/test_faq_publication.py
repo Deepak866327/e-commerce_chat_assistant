@@ -74,7 +74,7 @@ class FAQPublicationTests(unittest.TestCase):
     def test_unreviewed_unverified_or_malformed_publications_are_hidden(self):
         self.publish()
         original = self.store.rows("SELECT body FROM faqs WHERE id=?", (self.faq_id,))[0]["body"]
-        mutations = [(original, None), (encode({**json.loads(original), "verified": False}), "reviewer"),
+        mutations = [(original, None), (original, ""), (encode({**json.loads(original), "verified": False}), "reviewer"),
                      ("invalid json", "reviewer"), ("[]", "reviewer"),
                      (encode({**json.loads(original), "answer": ""}), "reviewer")]
         for body, reviewer in mutations:

@@ -42,6 +42,8 @@ class SupportContextTests(unittest.TestCase):
         self.assertEqual(changed["issue_type"], "payment")
         self.assertIsNone(changed["ticket_reference"])
         self.assertNotIn("refund", " ".join(changed["customer_reported"]))
+        self.assertIsNone(remember_customer(state, "Another refund is missing")["ticket_reference"])
+        self.assertIsNone(remember_customer(resolved, "My refund is missing")["ticket_reference"])
 
     def test_context_is_redacted_bounded_and_untrusted(self):
         state = remember_customer({}, "My refund for order:ABC123456 belongs to user@example.com")

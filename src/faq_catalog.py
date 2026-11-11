@@ -9,7 +9,7 @@ def published_faqs(store):
     rows = store.rows("""SELECT f.id,f.chunk_id,f.body FROM faqs f
         JOIN documents d ON d.id=f.document_id
         JOIN chunks c ON c.id=f.chunk_id AND c.document_id=f.document_id AND c.version_id=f.version_id
-        WHERE f.status='PUBLISHED' AND f.reviewer IS NOT NULL AND d.deleted=0
+        WHERE f.status='PUBLISHED' AND f.reviewer IS NOT NULL AND TRIM(f.reviewer)<>'' AND d.deleted=0
         AND d.active_version=f.version_id ORDER BY f.updated_at DESC,f.id""")
     published = []
     for row in rows:
