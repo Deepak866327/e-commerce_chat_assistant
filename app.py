@@ -162,6 +162,8 @@ def main():
             disabled=not voice_enabled,
             help="Try Hindi / Hinglish if automatic detection struggles with mixed speech.",
         )
+        chat_language = st.selectbox("Chat language", ["Hinglish", "English", "Hindi"])
+        response_language = {"Hinglish": "hinglish", "English": "en", "Hindi": "hi"}[chat_language]
         st.caption("Voice recordings are transcribed locally using a small multilingual model.")
         st.caption("Read-aloud voices depend on your browser and device.")
         try:
@@ -199,7 +201,8 @@ def main():
     render_message(user_message, len(st.session_state.messages))
     try:
         with st.spinner("ShopAssist is thinking..."):
-            result = ask_shopassist(question, st.session_state.chat_history, st.session_state.support_session)
+            result = ask_shopassist(question, st.session_state.chat_history, st.session_state.support_session,
+                                    response_language=response_language)
     except Exception:
         logger.error("Chat request failed")
         st.error("Support is temporarily unavailable. Please try again shortly.")

@@ -6,6 +6,7 @@ import time
 
 from src.chat_service import ChatService, MAX_HISTORY_MESSAGES
 from src.config import Settings
+from src.language import message, language_instruction
 from src.conversation import conversational_reply
 from src.observability import Monitor
 from src.ollama_client import OllamaClient
@@ -36,7 +37,7 @@ def runtime():
                        GroundingVerifier(client, settings.verifier_model), monitor)
 
 
-def _escalate(question, history, session, result):
+def _escalate(question, history, session, result, response_language="hinglish"):
     from src.chat_service import history_messages
     from src.tickets import TicketService, requires_ticket
     if result.get("ticket") or not requires_ticket(result):
@@ -48,17 +49,16 @@ def _escalate(question, history, session, result):
         store = Store(settings.state_dir / "control.sqlite3")
         result["ticket"] = TicketService(store, settings).open(question, result, history_messages(history), session, reason)
         if reason == "explicit_handoff":
-            result["answer"] = (f"Aapka support ticket {result['ticket']['reference']} bana diya gaya hai. "
-                                "Aapki request human support queue mein hai. Neeche ticket ka status aur replies check kar sakte hain.")
+            result["answer"] = message("support_queued", response_language, reference=result["ticket"]["reference"])
     except Exception as exc:
         logger.error("Support ticket creation failed: %s", type(exc).__name__)
         result["ticket_error"] = True
     return result
 
 
-def _conversation(question, session, history=None):
+def _conversation(question, session, history=None, response_language="hinglish"):
     started = time.perf_counter()
-    reply = conversational_reply(question)
+    reply = conversational_reply(question, response_language)
     if reply is None:
         return None
     settings = Settings.from_env()
@@ -70,34 +70,36 @@ def _conversation(question, session, history=None):
         reply["query_id"] = Monitor(store, settings).trace(session, {"question": question, **reply})
     except Exception as exc:
         logger.error("Conversation trace failed: %s", type(exc).__name__)
-    return _escalate(question, history, session, reply)
+    return _escalate(question, history, session, reply, response_language)
 
 
-def ask_structured(question, chat_history=None, session="local"):
+def ask_structured(question, chat_history=None, session="local", *, response_language="hinglish"):
     """Public structured contract. Citation sources are verified objects."""
     if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000:
         raise ValueError("Question must contain 1–2000 characters")
+    language_instruction(response_language)
     question = question.strip()
-    reply = _conversation(question, session, chat_history)
+    reply = _conversation(question, session, chat_history, response_language)
     if reply is not None:
         return reply
     try:
-        return _escalate(question, chat_history, session, runtime().ask(question, chat_history, session))
+        return _escalate(question, chat_history, session, runtime().ask(
+            question, chat_history, session, response_language=response_language), response_language)
     except IndexUnavailable:
         # Keep the UI operational when models/indexes need installation. Do not
         # serve a different model/dimension behind the active collection name.
-        from src.chat_service import ABSTENTION
-        return _escalate(question, chat_history, session, {"answer": ABSTENTION, "answerable": False, "sources": [],
+        return _escalate(question, chat_history, session, {"answer": message("abstention", response_language), "answerable": False, "sources": [],
                 "needs_human_support": True, "reason": "index_unavailable", "search_query": question,
-                "query_id": None, "verification": {"passed": False}, "confidence": None})
+                "query_id": None, "verification": {"passed": False}, "confidence": None}, response_language)
 
 
-def ask_shopassist(question, chat_history, session="local"):
+def ask_shopassist(question, chat_history, session="local", *, response_language="hinglish"):
     """Preserve answer/search_query/display-source keys used by existing callers."""
     if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000:
         raise ValueError("Question must contain 1–2000 characters")
+    language_instruction(response_language)
     question = question.strip()
-    reply = _conversation(question, session, chat_history)
+    reply = _conversation(question, session, chat_history, response_language)
     if reply is not None:
         return reply
     settings = Settings.from_env()
@@ -114,17 +116,17 @@ def ask_shopassist(question, chat_history, session="local"):
         started = time.perf_counter()
         client = OllamaClient(settings)
         if suspicious(question):
-            answer = ChatService.abstain("unsafe_request")
+            answer = ChatService.abstain("unsafe_request", response_language)
             intent = "BLOCKED"
         else:
             from src.ollama_client import InvalidModelOutput, ModelUnavailable
             try:
                 intent = classify_query(client, settings.utility_model, redact(question), history)
-                answer = response_without_retrieval(intent, question)
+                answer = response_without_retrieval(intent, question, response_language)
             except (InvalidModelOutput, ModelUnavailable):
                 # An unavailable filter must not trigger blind retrieval.
                 intent = "UNAVAILABLE"
-                answer = ChatService.abstain("intent_filter_unavailable")
+                answer = ChatService.abstain("intent_filter_unavailable", response_language)
         if answer is not None:
             result = {**answer.model_dump(), "search_query": "", "sources": [], "route": intent.lower(),
                       "retrieval_required": False, "retrieval_performed": False,
@@ -134,19 +136,19 @@ def ask_shopassist(question, chat_history, session="local"):
                 from src.legacy_rag import ask_shopassist as legacy_ask
                 from langchain_core.messages import AIMessage, HumanMessage
                 legacy_history = [(HumanMessage if m["role"] == "user" else AIMessage)(content=m["content"]) for m in history]
-                result = legacy_ask(question, legacy_history, intent_checked=True)
+                result = legacy_ask(question, legacy_history, intent_checked=True, response_language=response_language)
                 result.update(route="knowledge", retrieval_required=True, retrieval_performed=True,
                               needs_human_support=False,
                               verification={"passed": False, "reason": "legacy_pipeline_not_verified"})
             except Exception as exc:
                 logger.error("Legacy answer failed: %s", type(exc).__name__)
-                result = {**ChatService.abstain("service_unavailable").model_dump(),
+                result = {**ChatService.abstain("service_unavailable", response_language).model_dump(),
                           "route": "knowledge", "search_query": question,
                           "retrieval_required": True, "retrieval_performed": None}
         result.update(pipeline="legacy", confidence=None, latency_seconds=time.perf_counter() - started)
         result["query_id"] = monitor.trace(session, {"question": question, **result})
-        return _escalate(question, chat_history, session, result)
-    result = ask_structured(question, chat_history, session)
+        return _escalate(question, chat_history, session, result, response_language)
+    result = ask_structured(question, chat_history, session, response_language=response_language)
     citations = result["sources"]
     filenames = {c["id"]: c["metadata"].get("source", c["metadata"]["document_id"])
                  for c in result.get("retrieved_chunks", [])}

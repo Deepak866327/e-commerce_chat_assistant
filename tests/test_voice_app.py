@@ -112,6 +112,13 @@ class VoiceAppTests(unittest.TestCase):
     def test_empty_published_catalog_does_not_show_faq_buttons(self):
         self.assertFalse(any(header.value == "Frequently asked questions" for header in self.app.subheader))
 
+    def test_chat_language_is_independent_of_speech_language(self):
+        next(select for select in self.app.selectbox if select.label == "Chat language").select("English").run()
+        self.app.chat_input[0].set_value("What is your refund policy?").run()
+        self.assertFalse(self.app.exception)
+        self.assertEqual(self.answer.call_args.kwargs["response_language"], "en")
+        self.transcribe.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,6 @@
 # Frozen pre-upgrade pipeline for controlled baseline evaluation only.
 from pathlib import Path
+from src.language import language_instruction, message
 
 from langchain_ollama import ChatOllama
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -112,7 +113,7 @@ def _initialize():
 
     STRICT INSTRUCTIONS:
 
-    1. Answer in natural Hinglish (Hindi + English).
+    1. Follow the requested response language.
     2. For company policy facts, use ONLY the retrieved
        policy context.
     3. Do not add unrelated policy information.
@@ -153,6 +154,7 @@ def _initialize():
         (
             "system",
             SYSTEM_RULES
+            + "\nRESPONSE LANGUAGE: {response_language}"
             + "\n\nVERIFIED POLICY CONTEXT:\n{context}"
         ),
         MessagesPlaceholder(variable_name="chat_history"),
@@ -221,7 +223,8 @@ def _initialize():
 
     return db, scope_chain, rewrite_chain, answer_chain, OUT_OF_SCOPE_REPLY
 
-def ask_shopassist(question, chat_history, *, intent_checked=False):
+def ask_shopassist(question, chat_history, *, intent_checked=False, response_language="hinglish"):
+    language_instruction(response_language)
     db, scope_chain, rewrite_chain, answer_chain, OUT_OF_SCOPE_REPLY = _initialize()
     chat_history = chat_history[-MAX_HISTORY_MESSAGES:]
 
@@ -238,7 +241,7 @@ def ask_shopassist(question, chat_history, *, intent_checked=False):
 
     if scope_result != "IN_SCOPE":
         return {
-            "answer": OUT_OF_SCOPE_REPLY,
+            "answer": message("out_of_scope", response_language),
             "search_query": question,
             "sources": []
         }
@@ -296,6 +299,7 @@ def ask_shopassist(question, chat_history, *, intent_checked=False):
     response = answer_chain.invoke({
         "question": question,
         "context": context,
+        "response_language": language_instruction(response_language),
         "chat_history": chat_history
     })
 
