@@ -136,7 +136,7 @@ def ask_shopassist(question, chat_history, session="local"):
                 legacy_history = [(HumanMessage if m["role"] == "user" else AIMessage)(content=m["content"]) for m in history]
                 result = legacy_ask(question, legacy_history, intent_checked=True)
                 result.update(route="knowledge", retrieval_required=True, retrieval_performed=True,
-                              needs_human_support=False,
+                              needs_human_support=result.get("needs_human_support", False),
                               verification={"passed": False, "reason": "legacy_pipeline_not_verified"})
             except Exception as exc:
                 logger.error("Legacy answer failed: %s", type(exc).__name__)
