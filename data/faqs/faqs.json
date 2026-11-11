@@ -1,0 +1,70 @@
+
+{
+  "faqs": [
+    {
+      "faq_id": "FAQ001",
+      "category": "order_cancellation",
+      "question": "How can I cancel my order?",
+      "answer": "You can cancel your order before it has been dispatched. Once your order has been dispatched, cancellation is no longer available under this policy. You must follow the applicable return procedure after delivery.",
+      "keywords": [
+        "cancel order",
+        "cancel my purchase",
+        "stop my order",
+        "order cancellation"
+      ],
+      "status": "active"
+    },
+    {
+      "faq_id": "FAQ002",
+      "category": "order_tracking",
+      "question": "How can I track my order?",
+      "answer": "You will receive tracking information after your order has been dispatched. It may include the courier company, tracking number and estimated delivery date. If your tracking information has not been updated for more than 48 hours, contact customer support with your order details.",
+      "keywords": [
+        "track order",
+        "order status",
+        "where is my order",
+        "delivery tracking"
+      ],
+      "status": "active"
+    },
+    {
+      "faq_id": "FAQ003",
+      "category": "refund",
+      "question": "How long does a refund take?",
+      "answer": "After the returned product passes inspection and the refund is approved, it is generally processed within 5-7 business days. The time for the amount to appear in your bank account may depend on your payment provider. Prepaid order refunds are normally issued to the original payment method.",
+      "keywords": [
+        "refund time",
+        "refund status",
+        "money not received",
+        "refund processing"
+      ],
+      "status": "active"
+    },
+    {
+      "faq_id": "FAQ004",
+      "category": "shipping",
+      "question": "How long does shipping take?",
+      "answer": "Standard shipping generally takes 4-6 business days after dispatch. Express shipping generally takes 1-2 business days after dispatch in eligible locations. Actual delivery times may vary depending on location, courier availability and operational conditions.",
+      "keywords": [
+        "delivery time",
+        "shipping duration",
+        "when will my order arrive",
+        "express delivery"
+      ],
+      "status": "active"
+    },
+    {
+      "faq_id": "FAQ005",
+      "category": "warranty",
+      "question": "What is the warranty policy?",
+      "answer": "Eligible electronic products purchased through ShopAssist include a 12-month limited warranty from the delivery date. Warranty coverage depends on the product category and terms displayed on the product listing. Manufacturing defects during normal usage may be covered, subject to verification and technical inspection.",
+      "keywords": [
+        "product warranty",
+        "warranty duration",
+        "warranty coverage",
+        "manufacturing defect"
+      ],
+      "status": "active"
+    }
+  ]
+}

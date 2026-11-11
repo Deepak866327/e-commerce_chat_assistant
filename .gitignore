@@ -1,5 +1,6 @@
 # Python environments and caches
 .venv/
+.venv311/
 venv/
 env/
 __pycache__/
@@ -37,6 +38,7 @@ htmlcov/
 /models/speech/
 /vector_store/
 /data/training/
+/data/support_tickets.db*
 
 # Editor and operating system files
 .vscode/

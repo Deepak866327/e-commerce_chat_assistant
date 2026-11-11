@@ -67,6 +67,19 @@ The first run downloads `sentence-transformers/all-MiniLM-L6-v2` for embeddings.
 
 ### 3. Start the application
 
+Index the approved FAQ answers before starting the app:
+
+```powershell
+.\.venv\Scripts\python.exe src/ingest_faqs.py
+```
+
+FAQ answers live in `data/faqs/faqs.json`. Only active entries with a question
+and answer are indexed. Run ingestion again after editing them. The app requires
+both the policy and FAQ collections. Explicit requests for human support create
+a local ticket in `data/support_tickets.db`; this runtime database is excluded
+from Git and must be preserved between deployments. Ticket creation does not
+notify a support team or connect to an external help desk.
+
 ```powershell
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
