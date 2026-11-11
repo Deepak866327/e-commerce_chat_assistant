@@ -20,7 +20,7 @@ def clean_context(context):
         values = context.get(key, [])
         if not isinstance(values, list):
             return []
-        return [redact(value[:300]) for value in values[-6:]
+        return [redact(value)[:300] for value in values[-6:]
                 if isinstance(value, str) and value.strip() and not suspicious(value)]
     reference = context.get("ticket_reference")
     topic = context.get("issue_type")
@@ -43,7 +43,7 @@ def remember_customer(context, question):
     if topic and (topic != state["issue_type"] or new_issue or state["resolution"] == "customer_reported_resolved"):
         state = clean_context({"issue_type": topic})
     if state["issue_type"] and normalized:
-        report = redact(question[:300])
+        report = redact(question)[:300]
         if report not in state["customer_reported"]:
             reports = state["customer_reported"] + [report]
             state["customer_reported"] = reports[:2] + reports[-4:] if len(reports) > 6 else reports
