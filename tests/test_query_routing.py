@@ -135,3 +135,33 @@ class QueryRoutingTests(unittest.TestCase):
         messages = client.structured.call_args.args[1]
         self.assertEqual(messages[1:-1], history)
         self.assertEqual(messages[-1], {"role": "user", "content": "And express?"})
+
+    def test_hindi_handoff_and_negation_work_without_a_model(self):
+        from src.rag_memory import ask_shopassist
+        for question in ("mujhe customer care se baat karni hai", "मुझे एजेंट से बात करनी है"):
+            with self.subTest(question=question), \
+                 patch("src.rag_memory.Settings.from_env", return_value=self.settings), \
+                 patch("src.rag_memory.runtime", side_effect=AssertionError("No model required")):
+                result = ask_shopassist(question, [], "hindi-handoff")
+                self.assertEqual(result["route"], "human_support")
+                self.assertIn("ticket", result)
+        for question in ("I do not want to talk to a human", "I don't want to talk to a human",
+                         "mujhe agent se baat nahi karni", "मुझे एजेंट से बात नहीं करनी"):
+            with self.subTest(question=question), patch("src.rag_memory.Settings.from_env", return_value=self.settings):
+                result = ask_shopassist(question, [], "declined-handoff")
+                self.assertFalse(result["needs_human_support"])
+                self.assertNotIn("ticket", result)
+        self.assertIsNone(conversational_reply("No agent please; what is your refund policy?"))
+
+    def test_action_requests_ask_one_relevant_question_without_policy_claims(self):
+        from src.query_routing import response_without_retrieval
+        for question, expected in (("My refund is overdue. Expedite it.", "refund approval"),
+                                   ("Cancel my order", "dispatch"),
+                                   ("My payment failed", "error message"),
+                                   ("Where is my package?", "tracking update")):
+            with self.subTest(question=question):
+                answer = response_without_retrieval("ACCOUNT_ACTION", question)
+                self.assertIn(expected, answer.answer)
+                self.assertTrue(answer.needs_human_support)
+                self.assertEqual(answer.sources, [])
+                self.assertEqual(answer.answer.count("?"), 1)

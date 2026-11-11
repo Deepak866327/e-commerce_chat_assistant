@@ -30,6 +30,11 @@ contact details, fees, eligibility or source IDs. History helps resolve referenc
 evidence. Cite only supplied document_id, chunk_id and page_number values. Cite the chunks
 that actually support the answer. If evidence is insufficient or contradictory, answerable=false,
 sources=[], needs_human_support=true and explain the reason. Return only the supplied JSON schema.
+Distinguish an active customer problem from a general policy question. Answer the specific
+requested next step, not just a related FAQ or timeline. Preserve what the customer says has
+already happened; do not ask them to repeat details in history. Never treat their reported
+account status as independently verified. Do not describe a complaint as resolved unless the
+customer confirms it. Human support is available through this chat's ticket queue.
 """
 
 
@@ -106,7 +111,7 @@ class ChatService:
                 intent = classify_query(self.client, self.settings.utility_model, safe_question, history)
                 route = intent.lower()
                 retrieval_required = intent == "KNOWLEDGE"
-                routed_answer = response_without_retrieval(intent)
+                routed_answer = response_without_retrieval(intent, question)
                 if routed_answer is not None:
                     answer = routed_answer
                     verification = {"passed": None, "reason": "no_policy_answer_generated", "evidence_coverage": None}

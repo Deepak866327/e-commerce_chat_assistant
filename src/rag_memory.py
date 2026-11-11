@@ -120,7 +120,7 @@ def ask_shopassist(question, chat_history, session="local"):
             from src.ollama_client import InvalidModelOutput, ModelUnavailable
             try:
                 intent = classify_query(client, settings.utility_model, redact(question), history)
-                answer = response_without_retrieval(intent)
+                answer = response_without_retrieval(intent, question)
             except (InvalidModelOutput, ModelUnavailable):
                 # An unavailable filter must not trigger blind retrieval.
                 intent = "UNAVAILABLE"

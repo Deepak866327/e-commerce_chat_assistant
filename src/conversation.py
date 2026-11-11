@@ -43,9 +43,17 @@ def conversational_reply(question):
                         "connect me to a human", "create a ticket", "raise a ticket", "raise ticket", "agent please",
                         "talk to an agent", "speak to an agent", "real person", "customer support agent",
                         "connect me to support", "connect me with support", "speak to support", "talk to support",
-                        "contact support team", "live agent", "customer care executive"}:
+                        "contact support team", "live agent", "customer care executive",
+                        "mujhe customer care se baat karni hai", "mujhe agent se baat karni hai",
+                        "mujhe human se baat karni hai", "support se baat karni hai",
+                        "मुझे कस्टमर केयर से बात करनी है", "मुझे एजेंट से बात करनी है"}:
         route = "human_support"
         answer = "Main aapki request ko human support tak pahunchane mein madad karunga."
+    elif normalized in {"i do not want to talk to a human", "i don t want to talk to a human",
+                        "i do not want a human agent", "no human agent", "no agent please",
+                        "mujhe agent se baat nahi karni", "मुझे एजेंट से बात नहीं करनी"}:
+        route = "clarification"
+        answer = "Theek hai. Aap apni problem bataiye, main yahin madad karunga."
     elif normalized in {"help", "help me", "i need help", "can you help", "can you help me",
                         "i need support", "mujhe help chahiye", "mujhe madad chahiye"}:
         route = "clarification"
