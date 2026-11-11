@@ -23,6 +23,8 @@ htmlcov/
 /recordings/
 /generated_audio/
 /data/evaluation/
+/data/platform/
+/docs/reports/local/
 
 # Local credentials and configuration
 .env
@@ -31,6 +33,8 @@ htmlcov/
 !.env.sample
 !.env.template
 .streamlit/secrets.toml
+/deploy/ai-platform/runtime.env
+/deploy/ai-platform/credentials.json
 
 # Model weights and generated data
 *.gguf

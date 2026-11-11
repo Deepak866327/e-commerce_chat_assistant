@@ -1,0 +1,4 @@
+-r requirements.txt
+# Optional judge integrations. Lock the resolved environment after live validation.
+ragas>=0.3,<0.5
+deepeval>=3,<5

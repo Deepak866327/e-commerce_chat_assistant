@@ -10,7 +10,22 @@ An e-commerce customer support assistant built with Streamlit, LangChain, Chroma
 - A scope classifier for customer support questions.
 - A Streamlit chat interface with conversation history.
 - Local voice transcription with a lightweight multilingual Whisper model, an editable transcript, and browser read-aloud controls.
+- Support tickets for unresolved queries, customer replies, and an authenticated staff queue.
+- Reviewed, published FAQ suggestion buttons and background FAQ generation using the existing fine-tuned Qwen model.
 - Scripts for policy indexing and dataset preparation.
+
+Local FAQ candidates are included in `data/faqs/faqs.json`. Import an entry into
+the existing review workspace with `python -m src.admin import-faq
+data/faqs/faqs.json FAQ001 SOURCE_CHUNK_ID`. The command prompts for the admin
+password and checks the answer against that source chunk. Imported entries remain
+pending review until a reviewer approves and an administrator publishes them;
+the catalog's `active` status alone does not make an answer public. The convenience
+command `python src/ingest_faqs.py` accepts the same three arguments.
+
+The main app uses the platform's existing session-owned support tickets and staff
+queue, including additional human-agent request phrases from the local changes.
+`src/support_db.py` remains a standalone SQLite utility for local experiments;
+its database is excluded from Git and is separate from production tickets.
 
 The assistant provides guidance. It has no connection to an order, payment, cancellation, or refund processing backend.
 
@@ -63,22 +78,12 @@ The repository includes policy PDFs in `data/policies/`. Build the local Chroma 
 .\.venv\Scripts\python.exe src/ingest.py
 ```
 
-The first run downloads `sentence-transformers/all-MiniLM-L6-v2` for embeddings. The script stores the index in `vector_store/`, which is generated locally and excluded from Git. Run ingestion again after changing the PDFs; it replaces the existing indexed records.
+The upgraded script stages versioned knowledge in a separate Chroma collection and
+preserves existing records. Enable `SHOPASSIST_ALLOW_MODEL_DOWNLOAD=true` only
+during initial model provisioning. New indexes require a reviewed evaluation
+before activation; see [the platform runbook](docs/AI_PLATFORM_RUNBOOK.md).
 
 ### 3. Start the application
-
-Index the approved FAQ answers before starting the app:
-
-```powershell
-.\.venv\Scripts\python.exe src/ingest_faqs.py
-```
-
-FAQ answers live in `data/faqs/faqs.json`. Only active entries with a question
-and answer are indexed. Run ingestion again after editing them. The app requires
-both the policy and FAQ collections. Explicit requests for human support create
-a local ticket in `data/support_tickets.db`; this runtime database is excluded
-from Git and must be preserved between deployments. Ticket creation does not
-notify a support team or connect to an external help desk.
 
 ```powershell
 .\.venv\Scripts\python.exe -m streamlit run app.py
@@ -167,3 +172,48 @@ data/policies/                Policy documents
 - **Model not found:** Check `ollama list` and complete the model preparation steps above.
 - **ChromaDB is empty:** Run `src/ingest.py` from the project root before launching the application.
 - **Model artifact missing:** Obtain the custom GGUF separately and place it next to `models/Modelfile` before running `ollama create`.
+
+## Versioned AI platform upgrade
+
+The existing Python, Streamlit, Chroma and Ollama architecture is retained. The
+upgrade adds document versions, PDF/DOCX/TXT/CSV/approved-FAQ ingestion, optional
+table extraction/OCR, token chunks, grounded FAQ generation and human review,
+BM25/dense fusion, optional CPU BGE reranking, structured answers, citation checks,
+independent verification, safe abstention, feedback and local monitoring.
+
+Evaluation data is stored separately from production knowledge. The repository
+includes **54 unreviewed benchmark drafts**, not 300 approved cases or measured
+quality improvements. Ragas/DeepEval are optional local-model judge adapters.
+Signed reports, regression checks and index rollback support controlled releases.
+
+Operations extend the Python project through `python -m src.admin --help` and a
+staff workspace in the existing Streamlit app. Support staff can respond to tickets;
+reviewers can review FAQ drafts; administrators can queue generation and publish
+approved FAQs. SQLite holds workflow state; Chroma still holds vectors.
+
+Unresolved support answers and explicit human requests create a ticket. Customers
+can also use **Talk to a human** and check **Your support tickets** in the sidebar.
+Replies are available in the current browser session; click **Refresh ticket** to
+check for a staff response. Optional contact details require a configured encryption
+key. Ticket creation queues the request; it does not promise an immediate human reply.
+
+FAQ suggestions appear after a human reviews and publishes the generated drafts.
+Clicking a question sends it through the normal chat pipeline. Generated drafts,
+rejected FAQs and evaluation data never appear as customer suggestions. See the
+[runbook](docs/AI_PLATFORM_RUNBOOK.md) for staff credentials and worker setup.
+
+- [Audit](docs/AI_UPGRADE_AUDIT.md)
+- [Plan](docs/AI_UPGRADE_PLAN.md)
+- [Progress and remaining validation](docs/AI_UPGRADE_PROGRESS.md)
+- [Operations, evaluation and deployment](docs/AI_PLATFORM_RUNBOOK.md)
+
+Run offline checks with `python -m unittest discover -v` and
+`python -m compileall -q app.py src scripts tests`. Optional extraction/OCR and
+evaluation dependencies are in `requirements-ocr.txt` and `requirements-eval.txt`.
+`python scripts/offline_audit.py` generates extraction and chunk-structure reports.
+
+Existing deployments can explicitly set `SHOPASSIST_PIPELINE=legacy` while staging
+the upgrade. This preserves the previous customer answer pipeline and collection;
+its replies do **not** carry the new grounding guarantee. The default `grounded`
+pipeline requires an activated index. Production boot through `scripts/serve.py`
+checks a signed release report and the actual Ollama model digest.

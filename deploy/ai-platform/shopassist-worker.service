@@ -1,0 +1,29 @@
+[Unit]
+Description=ShopAssist document and FAQ background worker
+After=network-online.target ollama.service
+Wants=network-online.target
+Requires=ollama.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/shopassist
+EnvironmentFile=/home/ubuntu/shopassist/deploy/ai-platform/runtime.env
+Environment=OMP_NUM_THREADS=2
+Environment=TOKENIZERS_PARALLELISM=false
+Environment=SHOPASSIST_MODEL_TIMEOUT=300
+ExecStart=/home/ubuntu/shopassist/.venv/bin/python -m src.worker
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=600
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/shopassist/data/platform /home/ubuntu/shopassist/vector_store
+MemoryMax=3G
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

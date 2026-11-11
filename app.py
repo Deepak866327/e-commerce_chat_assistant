@@ -1,12 +1,13 @@
 from hashlib import sha256
 import logging
+from uuid import uuid4
 
 import streamlit as st
-from langchain_core.messages import AIMessage, HumanMessage
-
-from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist
+from src.config import Settings
+from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist, submit_feedback, faq_suggestions
 from src.speech_controls import speech_controls_html
 from src.voice import MAX_AUDIO_SECONDS, SAMPLE_RATE, SpeechInputError, transcribe_recording
+from src.support_ui import remember_ticket, render_customer_support, render_staff_workspace
 
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ def clear_conversation():
     st.session_state.messages = []
     st.session_state.chat_history = []
     st.session_state.pop("pending_voice_question", None)
+    st.session_state.pop("pending_faq_question", None)
     reset_voice_input()
 
 
@@ -31,6 +33,10 @@ def send_voice_question():
     if question:
         st.session_state.pending_voice_question = question
         reset_voice_input()
+
+
+def send_faq_question(question):
+    st.session_state.pending_faq_question = question
 
 
 def render_message(message, index):
@@ -45,6 +51,24 @@ def render_message(message, index):
                 speech_controls_html(message["content"], f"reply-{index}"),
                 unsafe_allow_javascript=True,
             )
+            if message.get("needs_human_support"):
+                if message.get("ticket"):
+                    st.info(f"Support ticket {message['ticket']['reference']} is in the human support queue. Check replies under Your support tickets.")
+                else:
+                    st.caption("Use Talk to a human to create a support ticket.")
+            if message.get("query_id"):
+                with st.expander("Rate this answer"):
+                    with st.form(f"feedback-{message['query_id']}"):
+                        kind = st.selectbox("Feedback", ["helpful", "not_helpful", "incorrect_answer",
+                                                          "missing_information", "outdated_information"],
+                                            format_func=lambda value: value.replace("_", " ").capitalize())
+                        comment = st.text_input("Details (optional)", max_chars=2000)
+                        if st.form_submit_button("Submit feedback"):
+                            try:
+                                submit_feedback(message["query_id"], kind, comment, st.session_state.support_session)
+                                st.success("Feedback recorded for review.")
+                            except (ValueError, PermissionError):
+                                st.warning("Feedback could not be saved for this conversation.")
 
 
 def render_voice_input(language):
@@ -105,6 +129,12 @@ def render_voice_input(language):
 
 def main():
     st.set_page_config(page_title="ShopAssist AI", page_icon="🛍️", layout="centered")
+    if Settings.from_env().require_login and not st.user.is_logged_in:
+        st.title("ShopAssist AI")
+        st.write("Sign in to contact support.")
+        if st.button("Sign in"):
+            st.login()
+        st.stop()
     st.title("ShopAssist AI")
     st.caption("Your AI-powered shopping support assistant")
 
@@ -115,6 +145,8 @@ def main():
         "voice_transcript": "",
         "voice_recording_digest": None,
         "voice_feedback": None,
+        "support_session": uuid4().hex,
+        "support_tickets": [],
     }
     for name, value in defaults.items():
         st.session_state.setdefault(name, value)
@@ -132,6 +164,22 @@ def main():
         )
         st.caption("Voice recordings are transcribed locally using a small multilingual model.")
         st.caption("Read-aloud voices depend on your browser and device.")
+        try:
+            suggestions = faq_suggestions()
+        except Exception:
+            logger.error("FAQ suggestions are temporarily unavailable")
+            suggestions = []
+        if suggestions:
+            st.subheader("Frequently asked questions")
+            for suggestion in suggestions:
+                st.button(suggestion["question"], key="faq-" + suggestion["faq_id"],
+                          on_click=send_faq_question, args=(suggestion["question"],))
+        render_customer_support()
+        staff_mode = st.toggle("Staff workspace", value=False)
+
+    if staff_mode:
+        render_staff_workspace()
+        return
 
     for index, message in enumerate(st.session_state.messages):
         render_message(message, index)
@@ -141,7 +189,8 @@ def main():
         render_voice_input(language[speech_language])
 
     typed_question = st.chat_input("Ask about shipping, returns, refunds...")
-    question = st.session_state.pop("pending_voice_question", None) or typed_question
+    question = (st.session_state.pop("pending_voice_question", None)
+                or st.session_state.pop("pending_faq_question", None) or typed_question)
     if not question or not question.strip():
         return
     question = question.strip()
@@ -150,22 +199,30 @@ def main():
     render_message(user_message, len(st.session_state.messages))
     try:
         with st.spinner("ShopAssist is thinking..."):
-            result = ask_shopassist(question, st.session_state.chat_history)
-    except Exception as error:
-        st.error(f"Something went wrong: {error}")
+            result = ask_shopassist(question, st.session_state.chat_history, st.session_state.support_session)
+    except Exception:
+        logger.error("Chat request failed")
+        st.error("Support is temporarily unavailable. Please try again shortly.")
         return
 
     assistant_message = {
         "role": "assistant",
         "content": result["answer"],
         "sources": result["sources"],
+        "query_id": result.get("query_id"),
+        "needs_human_support": result.get("needs_human_support", False),
+        "ticket": result.get("ticket"),
     }
+    if result.get("ticket"):
+        remember_ticket(result["ticket"])
     render_message(assistant_message, len(st.session_state.messages) + 1)
     st.session_state.messages.extend([user_message, assistant_message])
     st.session_state.chat_history.extend(
-        [HumanMessage(content=question), AIMessage(content=result["answer"])]
+        [{"role": "user", "content": question}, {"role": "assistant", "content": result["answer"]}]
     )
     st.session_state.chat_history = st.session_state.chat_history[-MAX_HISTORY_MESSAGES:]
+    if result.get("ticket"):
+        st.rerun()
 
 
 if __name__ == "__main__":

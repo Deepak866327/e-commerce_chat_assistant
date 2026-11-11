@@ -1,0 +1,17 @@
+{
+  "code_commit": "2ff9cd72c7fcc751bbaf138c0adfd37d743bcdd3",
+  "timestamp": "2026-11-11T08:09:46.995648+00:00",
+  "server_alias": "mitao",
+  "url": "https://api.friendzx.app",
+  "pipeline": "legacy",
+  "grounded_release_gate": false,
+  "checkpoint": "/home/ubuntu/shopassist-releases/20261111T080852Z-2ff9cd7/checkpoint",
+  "server_tests": {"run": 42, "passed": 42, "seconds": 5.973},
+  "compilation": "passed",
+  "dependency_check": "passed",
+  "live_chat_smoke": {"status": "passed", "seconds": 40.3, "source": "shipping.pdf, page 1"},
+  "public_check": {"status": "passed", "https": true, "websocket": true, "chat_rendered": true, "seconds": 0.8},
+  "existing_data_models_vectors_preserved": true,
+  "quality_acceptance_metrics": null,
+  "note": "Functional compatibility deployment; grounded RAG activation requires reviewed benchmark evidence. Smoke checks do not establish factual acceptance targets."
+}

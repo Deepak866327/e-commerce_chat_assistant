@@ -1,0 +1,1 @@
+{"categories": {"direct": 35, "multi_document": 1, "multi_turn": 2, "multilingual_typo": 2, "paraphrased": 8, "unanswerable": 6}, "count": 54, "dataset_version": "93f4cd238389877c41fd2479", "missing_source_groups": [], "quality_metrics": null, "reason": "Drafts require human ground-truth review; live fine-tuned model is absent", "release_gate": false, "reviewed": 0}

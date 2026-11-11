@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__
+**/__pycache__
+.env
+.env.*
+.streamlit/secrets.toml
+vector_store
+data/platform
+data/training
+data/evaluation
+models/*.gguf
+models/speech
+docs/reports/local
+*.log
