@@ -75,23 +75,40 @@ Server RAM: about 11 GiB total, 10 GiB available. Local RAM: about 7.7 GiB total
 The grounded production release gate remains **closed**. Compatibility deployment
 may use the existing legacy answer pipeline while new capabilities are staged.
 No claim is made that the acceptance targets are met or all live integrations are
-validated. Commit `a137d80` was pushed to GitHub `main`. A compatibility follow-up
-preserves the discovered server tests before retrying deployment. Server deployment
-outcomes must be recorded separately.
+validated. Commits `a137d80` and `2ff9cd7` were pushed to GitHub `main`.
+
+## Deployment completed: 2026-11-11
+
+- Deployed code commit: `2ff9cd72c7fcc751bbaf138c0adfd37d743bcdd3`.
+- Server: SSH alias `mitao`; existing `shopassist.service` and HTTPS proxy retained.
+- URL: https://api.friendzx.app . Local health returned `ok` after restart.
+- Server preflight: **42 tests passed** in 5.973 seconds; compilation and package
+  dependency check passed. Server runtime is Python 3.12.3 / Pydantic 2.14.2.
+  Its working virtual environment was preserved rather than unnecessarily replaced.
+- Actual Streamlit/Ollama policy-answer smoke passed in 40.3 seconds. This checks
+  functional chat and source retrieval, not factual acceptance or latency targets.
+- Public HTTPS, WebSocket and chat rendering passed in 0.8 seconds.
+- Live pipeline: explicit **legacy compatibility mode**. New platform source,
+  operations and feedback are installed; the grounded retrieval/verification path
+  is **not activated** and its release gate remains closed.
+- Existing model weights, policy documents, vector collection, deployment scripts,
+  TLS/proxy configuration and server voice tests were preserved.
+- Rollback checkpoint:
+  `/home/ubuntu/shopassist-releases/20261111T080852Z-2ff9cd7/checkpoint`.
+- Deployment manifest: `docs/reports/server_deployment.json`; server also keeps
+  `/home/ubuntu/shopassist/ai-release.json`.
 
 ## Remaining work and exact next steps
 
-1. Commit/push the tested source as explicitly requested, then checkpoint and
-   deploy it on mitao in legacy compatibility mode; verify existing chat health.
-2. Provision the separate Qwen 3B FAQ/verifier model on suitable server hardware.
-3. Execute real Chroma/embedding, OCR/Tesseract, FAQ and Ragas/DeepEval integration
+1. Provision the separate Qwen 3B FAQ/verifier model on suitable server hardware.
+2. Execute real new-index Chroma/embedding, OCR/Tesseract, FAQ and Ragas/DeepEval integration
    checks. Optional judge dependency ranges need a validated resolved lock.
-4. Stage a complete new index, regenerate benchmark IDs against it, human-review
+3. Stage a complete new index, regenerate benchmark IDs against it, human-review
    and expand the 54 drafts toward the supported target, including at least 30
    held-out reviewed cases. Human ground truth cannot be approved by this agent.
-5. Run A–E and 400/500/700/MiniLM/BGE experiments, diagnose failures and repeat.
+4. Run A–E and 400/500/700/MiniLM/BGE experiments, diagnose failures and repeat.
    Keep release closed until correctness/security/regression gates pass.
-6. Activate the measured index, switch the server to grounded mode, verify the
+5. Activate the measured index, switch the server to grounded mode, verify the
    actual fine-tuned model digest, then execute live customer/voice/feedback tests.
 
 Primary changed files are `app.py`, `src/ingest.py`, `src/rag_memory.py`, new
