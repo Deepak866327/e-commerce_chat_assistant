@@ -100,6 +100,18 @@ validated. Commits `a137d80` and `2ff9cd7` were pushed to GitHub `main`.
 
 ## Remaining work and exact next steps
 
+Intent-filter correction: the legacy scope filter included greetings and then
+always ran top-3 vector search for in-scope messages. Implemented a separate
+retrieval decision in both chat paths: fixed source-free conversational replies,
+then a structured history-aware KNOWLEDGE/CONVERSATION/CLARIFICATION/ACCOUNT_ACTION/
+OUT_OF_SCOPE filter. Only KNOWLEDGE reaches retrieval; model/index loading is lazy.
+Mixed greeting/policy messages and follow-ups continue to the policy pipeline.
+Local validation after this correction: **50 tests passed**, compilation passed,
+and dependency check passed. Push/deployment verification is pending at this entry.
+FAQ workflow exists in the backend; no customer FAQ list/buttons are implemented
+and the deployed legacy pipeline does not use FAQ retrieval. Benchmark drafts are
+separate, unreviewed evaluation data.
+
 1. Provision the separate Qwen 3B FAQ/verifier model on suitable server hardware.
 2. Execute real new-index Chroma/embedding, OCR/Tesseract, FAQ and Ragas/DeepEval integration
    checks. Optional judge dependency ranges need a validated resolved lock.

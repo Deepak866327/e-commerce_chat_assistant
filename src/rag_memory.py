@@ -2,11 +2,14 @@
 
 from functools import lru_cache
 import logging
+import time
 
 from src.chat_service import ChatService, MAX_HISTORY_MESSAGES
 from src.config import Settings
+from src.conversation import conversational_reply
 from src.observability import Monitor
 from src.ollama_client import OllamaClient
+from src.query_routing import classify_query, response_without_retrieval
 from src.retrieval import BGEReranker, Retriever
 from src.store import Store
 from src.vector_index import ChromaIndex, IndexUnavailable
@@ -25,16 +28,36 @@ def runtime():
     store = Store(settings.state_dir / "control.sqlite3")
     monitor = Monitor(store, settings)
     active_index = store.setting("active_index")
-    vector = _vector(settings, active_index) if active_index else None
-    reranker = BGEReranker(settings) if settings.use_reranker and active_index else None
     client = OllamaClient(settings)
-    retriever = Retriever(store, settings, vector, reranker)
+    retriever = Retriever(store, settings,
+        vector_factory=(lambda: _vector(settings, active_index)) if active_index else None,
+        reranker_factory=(lambda: BGEReranker(settings)) if settings.use_reranker and active_index else None)
     return ChatService(store, settings, client, retriever,
                        GroundingVerifier(client, settings.verifier_model), monitor)
 
 
+def _conversation(question, session):
+    started = time.perf_counter()
+    reply = conversational_reply(question)
+    if reply is None:
+        return None
+    settings = Settings.from_env()
+    store = Store(settings.state_dir / "control.sqlite3")
+    from src.security import rate_limit
+    rate_limit(store, session, settings.requests_per_minute)
+    reply["latency_seconds"] = time.perf_counter() - started
+    try:
+        reply["query_id"] = Monitor(store, settings).trace(session, {"question": question, **reply})
+    except Exception as exc:
+        logger.error("Conversation trace failed: %s", type(exc).__name__)
+    return reply
+
+
 def ask_structured(question, chat_history=None, session="local"):
     """Public structured contract. Citation sources are verified objects."""
+    reply = _conversation(question, session)
+    if reply is not None:
+        return reply
     try:
         return runtime().ask(question, chat_history, session)
     except IndexUnavailable:
@@ -48,23 +71,47 @@ def ask_structured(question, chat_history=None, session="local"):
 
 def ask_shopassist(question, chat_history, session="local"):
     """Preserve answer/search_query/display-source keys used by existing callers."""
+    reply = _conversation(question, session)
+    if reply is not None:
+        return reply
     settings = Settings.from_env()
     if settings.pipeline == "legacy":
         # Explicit migration mode lets existing deployments retain their working
         # collection while new indexes and human-reviewed evaluations are staged.
         # This mode makes no upgraded-grounding or verified-citation claim.
-        from src.legacy_rag import ask_shopassist as legacy_ask
-        from langchain_core.messages import AIMessage, HumanMessage
         from src.chat_service import history_messages
-        history = [(HumanMessage if m["role"] == "user" else AIMessage)(content=m["content"])
-                   for m in history_messages(chat_history)]
+        from src.security import rate_limit, redact, suspicious
+        history = history_messages(chat_history)
         store = Store(settings.state_dir / "control.sqlite3")
         monitor = Monitor(store, settings)
-        from src.security import rate_limit
         rate_limit(store, session, settings.requests_per_minute)
-        result = legacy_ask(question, history)
-        result.update(pipeline="legacy", confidence=None, needs_human_support=False,
-                      verification={"passed": False, "reason": "legacy_pipeline_not_verified"})
+        started = time.perf_counter()
+        client = OllamaClient(settings)
+        if suspicious(question):
+            answer = ChatService.abstain("unsafe_request")
+            intent = "BLOCKED"
+        else:
+            from src.ollama_client import InvalidModelOutput, ModelUnavailable
+            try:
+                intent = classify_query(client, settings.utility_model, redact(question), history)
+                answer = response_without_retrieval(intent)
+            except (InvalidModelOutput, ModelUnavailable):
+                # An unavailable filter must not trigger blind retrieval.
+                intent = "UNAVAILABLE"
+                answer = ChatService.abstain("intent_filter_unavailable")
+        if answer is not None:
+            result = {**answer.model_dump(), "search_query": "", "sources": [], "route": intent.lower(),
+                      "retrieval_required": False, "retrieval_performed": False,
+                      "verification": {"passed": None, "reason": "no_policy_answer_generated"}}
+        else:
+            from src.legacy_rag import ask_shopassist as legacy_ask
+            from langchain_core.messages import AIMessage, HumanMessage
+            legacy_history = [(HumanMessage if m["role"] == "user" else AIMessage)(content=m["content"]) for m in history]
+            result = legacy_ask(question, legacy_history, intent_checked=True)
+            result.update(route="knowledge", retrieval_required=True, retrieval_performed=True,
+                          needs_human_support=False,
+                          verification={"passed": False, "reason": "legacy_pipeline_not_verified"})
+        result.update(pipeline="legacy", confidence=None, latency_seconds=time.perf_counter() - started)
         result["query_id"] = monitor.trace(session, {"question": question, **result})
         return result
     result = ask_structured(question, chat_history, session)

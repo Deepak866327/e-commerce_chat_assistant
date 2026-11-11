@@ -31,6 +31,27 @@ existing deployed index. Keep it while the grounded pipeline is staged. It does
 not pass upgraded verification and cannot authorize a grounded release. After
 review and passing evaluation, switch to `grounded` and use `scripts/serve.py`.
 
+Both live-compatible and grounded chat entry points now route every query before
+retrieval. Exact greetings/thanks/farewells/general help messages use fixed
+non-policy replies without a model or vector search. Other messages pass a
+schema-constrained, history-aware intent filter: only KNOWLEDGE proceeds to
+document retrieval. CONVERSATION, CLARIFICATION, ACCOUNT_ACTION and OUT_OF_SCOPE
+return source-free replies. An unavailable intent filter abstains instead of
+searching blindly. A greeting prefix never suppresses an actual policy question;
+contextual follow-ups still use the recent conversation.
+
+The historical A/B baseline retains its original scope filter by default. The
+deployed legacy wrapper supplies the new intent decision so it does not run two
+classification calls. Its policy-answer generation remains the legacy path.
+
+FAQ implementation is a backend workflow, not a customer-facing FAQ list or
+suggestion-button UI. Approved/published question variants improve BM25 recall in
+the grounded retriever by resolving back to the official source chunk. The answer
+is generated and checked against that source, rather than blindly copying an FAQ.
+Drafts/rejected/outdated FAQs are excluded. The currently deployed legacy answer
+path does not query the FAQ store. The 54 benchmark drafts are evaluation examples,
+not published production FAQs, and cannot automatically become customer knowledge.
+
 ## Install and initialize
 
 Use Python 3.11 as in the original README, with a separate virtual environment.

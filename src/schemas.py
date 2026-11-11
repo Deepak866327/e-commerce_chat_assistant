@@ -56,3 +56,7 @@ class Rewrite(Contract):
 
 class Scope(Contract):
     label: Literal["IN_SCOPE", "OUT_OF_SCOPE"]
+
+
+class QueryIntent(Contract):
+    intent: Literal["KNOWLEDGE", "CONVERSATION", "CLARIFICATION", "ACCOUNT_ACTION", "OUT_OF_SCOPE"]

@@ -1,0 +1,125 @@
+from dataclasses import replace
+import json
+from pathlib import Path
+import tempfile
+from types import ModuleType, SimpleNamespace
+import unittest
+from unittest.mock import Mock, patch
+
+from src.chat_service import ChatService
+from src.config import Settings
+from src.conversation import conversational_reply
+from src.ollama_client import ModelUnavailable
+from src.query_routing import classify_query
+from src.schemas import QueryIntent
+from src.store import Store
+
+
+class QueryRoutingTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.settings = replace(Settings(), state_dir=Path(self.temp.name), requests_per_minute=100)
+        self.store = Store(self.settings.state_dir / "control.sqlite3")
+
+    def test_whole_message_shortcuts_do_not_swallow_policy_or_followups(self):
+        for question in ("hi", "Hello!", "hi bot", "नमस्ते", "thanks", "goodbye", "how are you?", "help me"):
+            with self.subTest(question=question):
+                reply = conversational_reply(question)
+                self.assertIsNotNone(reply)
+                self.assertEqual(reply["sources"], [])
+                self.assertFalse(reply["retrieval_required"])
+        for question in ("Hi, what is the return policy?", "Thanks, but how long is the refund?",
+                         "And express?", "yes", "Does it cover water damage?", "hello where is my order?"):
+            with self.subTest(question=question):
+                self.assertIsNone(conversational_reply(question))
+
+    def test_greeting_bypasses_model_index_and_grounded_runtime_in_both_modes(self):
+        from src.rag_memory import ask_shopassist, ask_structured
+        for pipeline in ("legacy", "grounded"):
+            with patch("src.rag_memory.Settings.from_env", return_value=replace(self.settings, pipeline=pipeline)), \
+                 patch("src.rag_memory.runtime", side_effect=AssertionError("must not load runtime")), \
+                 patch("src.rag_memory.OllamaClient", side_effect=AssertionError("must not call model")):
+                for call in (ask_shopassist, ask_structured):
+                    result = call("hi", [{"role": "user", "content": "refund policy?"}], "routing-tests")
+                    self.assertEqual(result["sources"], [])
+                    self.assertEqual(result["route"], "greeting")
+                    self.assertFalse(result["retrieval_performed"])
+                    self.assertIsNotNone(result["query_id"])
+        rows = self.store.rows("SELECT body FROM traces")
+        self.assertTrue(all(not json.loads(r["body"])["retrieval_performed"] for r in rows))
+
+    def test_grounded_nonknowledge_routes_do_not_read_corpus_or_search(self):
+        client, retriever, verifier = Mock(calls=[]), Mock(), Mock()
+        service = ChatService(self.store, self.settings, client, retriever, verifier)
+        for intent in ("CONVERSATION", "CLARIFICATION", "ACCOUNT_ACTION", "OUT_OF_SCOPE"):
+            client.structured.return_value = QueryIntent(intent=intent)
+            with self.subTest(intent=intent):
+                result = service.ask("An arbitrary routed customer message", record=False)
+                self.assertEqual(result["route"], intent.lower())
+                self.assertEqual(result["sources"], [])
+                self.assertFalse(result["retrieval_performed"])
+                self.assertFalse(result["retrieval_required"])
+        retriever.corpus.assert_not_called()
+        retriever.search.assert_not_called()
+        verifier.verify.assert_not_called()
+
+    def test_direct_service_greeting_skips_all_model_and_retrieval_calls(self):
+        client, retriever, verifier = Mock(calls=[]), Mock(), Mock()
+        result = ChatService(self.store, self.settings, client, retriever, verifier).ask("Hello!", record=False)
+        self.assertEqual(result["route"], "greeting")
+        client.structured.assert_not_called()
+        retriever.corpus.assert_not_called()
+        retriever.search.assert_not_called()
+
+    def test_legacy_nonknowledge_never_initializes_legacy_rag(self):
+        from src.rag_memory import ask_shopassist
+        legacy = ModuleType("src.legacy_rag")
+        legacy.ask_shopassist = Mock(side_effect=AssertionError("No model/index initialization"))
+        for intent in ("CONVERSATION", "CLARIFICATION", "ACCOUNT_ACTION", "OUT_OF_SCOPE"):
+            with patch("src.rag_memory.Settings.from_env", return_value=replace(self.settings, pipeline="legacy")), \
+                 patch("src.rag_memory.classify_query", return_value=intent), \
+                 patch.dict("sys.modules", {"src.legacy_rag": legacy}):
+                result = ask_shopassist("An arbitrary routed customer message", [], "routing-tests")
+                self.assertEqual(result["route"], intent.lower())
+                self.assertFalse(result["retrieval_performed"])
+                self.assertEqual(result["sources"], [])
+                legacy.ask_shopassist.assert_not_called()
+
+    def test_legacy_policy_uses_filter_once_and_preserves_followup_history(self):
+        from src.rag_memory import ask_shopassist
+        history = [{"role": "user", "content": "What is standard shipping time?"}]
+        legacy = ModuleType("src.legacy_rag")
+        legacy.ask_shopassist = Mock(return_value={"answer": "Policy answer", "search_query": "express shipping?", "sources": ["shipping.pdf, page 1"]})
+        messages = ModuleType("langchain_core.messages")
+        messages.AIMessage = messages.HumanMessage = lambda content: SimpleNamespace(content=content)
+        with patch("src.rag_memory.Settings.from_env", return_value=replace(self.settings, pipeline="legacy")), \
+             patch("src.rag_memory.classify_query", return_value="KNOWLEDGE") as classify, \
+             patch.dict("sys.modules", {"src.legacy_rag": legacy, "langchain_core.messages": messages}):
+            result = ask_shopassist("And express?", history, "routing-tests")
+            self.assertTrue(result["retrieval_performed"])
+            self.assertTrue(result["sources"])
+            self.assertEqual(classify.call_args.args[-1], history)
+            self.assertTrue(legacy.ask_shopassist.call_args.kwargs["intent_checked"])
+            self.assertEqual(legacy.ask_shopassist.call_args.args[1][0].content, history[0]["content"])
+
+    def test_filter_failure_does_not_trigger_retrieval(self):
+        from src.rag_memory import ask_shopassist
+        legacy = ModuleType("src.legacy_rag")
+        legacy.ask_shopassist = Mock()
+        with patch("src.rag_memory.Settings.from_env", return_value=replace(self.settings, pipeline="legacy")), \
+             patch("src.rag_memory.classify_query", side_effect=ModelUnavailable("offline")), \
+             patch.dict("sys.modules", {"src.legacy_rag": legacy}):
+            result = ask_shopassist("A question that needs routing", [], "routing-tests")
+            self.assertEqual(result["reason"], "intent_filter_unavailable")
+            self.assertFalse(result["retrieval_performed"])
+            legacy.ask_shopassist.assert_not_called()
+
+    def test_classifier_keeps_latest_query_and_history_separate_from_rules(self):
+        client = Mock()
+        client.structured.return_value = QueryIntent(intent="KNOWLEDGE")
+        history = [{"role": "user", "content": "Shipping?"}, {"role": "assistant", "content": "Which option?"}]
+        self.assertEqual(classify_query(client, "utility", "And express?", history), "KNOWLEDGE")
+        messages = client.structured.call_args.args[1]
+        self.assertEqual(messages[1:-1], history)
+        self.assertEqual(messages[-1], {"role": "user", "content": "And express?"})

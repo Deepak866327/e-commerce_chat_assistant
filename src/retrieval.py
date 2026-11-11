@@ -65,10 +65,12 @@ class BGEReranker:
 
 
 class Retriever:
-    def __init__(self, store, settings, vector=None, reranker=None, candidate_index=None):
+    def __init__(self, store, settings, vector=None, reranker=None, candidate_index=None,
+                 vector_factory=None, reranker_factory=None):
         self.store, self.settings = store, settings
         self.vector, self.reranker = vector, reranker
         self.candidate_index = candidate_index
+        self.vector_factory, self.reranker_factory = vector_factory, reranker_factory
 
     def corpus(self):
         index_id = self.candidate_index or self.store.setting("active_index")
@@ -97,6 +99,8 @@ class Retriever:
                 raise ValueError("Unsupported metadata filter")
             rows = [r for r in rows if all(r["metadata"].get(k) == v for k, v in metadata_filter.items())]
         by_id = {r["id"]: r for r in rows}
+        if by_id and self.vector is None and self.vector_factory:
+            self.vector = self.vector_factory()
         dense = self.vector.search(query, self.settings.dense_k, set(by_id)) if self.vector and by_id else []
         dense = [(cid, score) for cid, score in dense if cid in by_id and score >= self.settings.min_dense_similarity]
         keyword = bm25(query, rows, self.settings.keyword_k) if hybrid else []
@@ -123,6 +127,8 @@ class Retriever:
                 break
         retrieval_seconds = time.perf_counter() - started
         rerank_start = time.perf_counter()
+        if rerank and candidates and self.reranker is None and self.reranker_factory:
+            self.reranker = self.reranker_factory()
         if rerank and self.reranker and candidates:
             scores = dict(self.reranker.rank(query, candidates))
             for candidate in candidates:

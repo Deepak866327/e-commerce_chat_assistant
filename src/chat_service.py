@@ -7,7 +7,9 @@ import time
 from uuid import uuid4
 
 from src.ollama_client import InvalidModelOutput, ModelUnavailable
-from src.schemas import Answer, Rewrite, Scope
+from src.conversation import conversational_reply
+from src.schemas import Answer, Rewrite
+from src.query_routing import classify_query, response_without_retrieval
 from src.security import rate_limit, redact, suspicious
 from src.verification import numbers, validate_citations
 
@@ -69,7 +71,8 @@ class ChatService:
         self.store, self.settings, self.client = store, settings, client
         self.retriever, self.verifier, self.monitor = retriever, verifier, monitor
 
-    def abstain(self, reason):
+    @staticmethod
+    def abstain(reason):
         return Answer(answer=ABSTENTION, answerable=False, sources=[], needs_human_support=True, reason=reason)
 
     def ask(self, question, history=None, session="local", *, verify=True, hybrid=True, rerank=True, record=True):
@@ -84,23 +87,32 @@ class ChatService:
         verification = {"passed": False, "reason": "not_run", "evidence_coverage": 0.0}
         search_query = safe_question
         error = None
+        conversation = conversational_reply(question)
+        route = conversation["route"] if conversation else "undetermined"
+        retrieval_required = False
+        retrieval_performed = False
         call_start = len(self.client.calls) if hasattr(self.client, "calls") else 0
         try:
             if record:
                 rate_limit(self.store, session, self.settings.requests_per_minute)
-            if suspicious(question):
+            if conversation is not None:
+                answer = Answer.model_validate({k: conversation[k] for k in Answer.model_fields})
+                verification = conversation["verification"]
+                search_query = ""
+            elif suspicious(question):
+                route = "blocked"
                 answer = self.abstain("unsafe_request")
-            elif not self.retriever.corpus():
-                answer = self.abstain("no_validated_knowledge")
             else:
-                scope = self.client.structured(self.settings.utility_model, [
-                    {"role": "system", "content": "Classify e-commerce support questions including shipping, returns, refunds, "
-                     "payments, cancellations, warranty, support greetings and related follow-ups as IN_SCOPE. "
-                     "General coding, politics, entertainment and unrelated questions are OUT_OF_SCOPE. Return the schema."},
-                    *history, {"role": "user", "content": safe_question},
-                ], Scope)
-                if scope.label == "OUT_OF_SCOPE":
-                    answer = Answer(answer=OUT_OF_SCOPE_REPLY, answerable=False, sources=[], needs_human_support=False, reason="out_of_scope")
+                intent = classify_query(self.client, self.settings.utility_model, safe_question, history)
+                route = intent.lower()
+                retrieval_required = intent == "KNOWLEDGE"
+                routed_answer = response_without_retrieval(intent)
+                if routed_answer is not None:
+                    answer = routed_answer
+                    verification = {"passed": None, "reason": "no_policy_answer_generated", "evidence_coverage": None}
+                    search_query = ""
+                elif not self.retriever.corpus():
+                    answer = self.abstain("no_validated_knowledge")
                 else:
                     if history:
                         try:
@@ -113,6 +125,7 @@ class ChatService:
                             search_query = safe_rewrite(safe_question, rewrite.question, history)
                         except (InvalidModelOutput, ModelUnavailable):
                             search_query = safe_question
+                    retrieval_performed = True
                     retrieval = self.retriever.search(search_query, hybrid=hybrid, rerank=rerank)
                     if search_query != safe_question:
                         # Fuse original intent and resolved context without dropping
@@ -165,7 +178,7 @@ class ChatService:
             answer = self.abstain("service_unavailable")
         # Recheck active-version membership after inference: a concurrent delete
         # or source update must invalidate the response before it is returned.
-        if answer.answerable:
+        if answer.answerable and answer.sources:
             current_ids = {c["id"] for c in self.retriever.corpus()}
             if any(c.chunk_id not in current_ids for c in answer.sources):
                 answer = self.abstain("source_changed_during_generation")
@@ -176,6 +189,9 @@ class ChatService:
                    "evidence_coverage": verification.get("evidence_coverage"),
                    "verification_passed": verification["passed"]}
         result = {**answer.model_dump(), "query_id": query_id, "search_query": search_query,
+                  "route": route,
+                  "retrieval_required": retrieval_required,
+                  "retrieval_performed": retrieval_performed,
                   "prompt_version": PROMPT_VERSION, "model_version": self.settings.answer_model,
                   "verification": verification, "confidence": None, "confidence_signals": signals,
                   "latency_seconds": time.perf_counter() - started, "error": error,
@@ -183,7 +199,7 @@ class ChatService:
                   "inference_seconds": sum(c["seconds"] for c in calls),
                   "retrieved_chunks": retrieval["chunks"], "retrieval_candidates": retrieval["candidates"]}
         calibration = self.store.setting("confidence_calibration")
-        if calibration and answer.answerable:
+        if calibration and answer.answerable and answer.sources:
             from src.calibration import calibrated_confidence
             fitted = json.loads(calibration)
             if fitted.get("index_id") == self.store.setting("active_index") and fitted.get("model_version") == self.settings.answer_model:

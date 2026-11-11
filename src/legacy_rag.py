@@ -213,7 +213,7 @@ def _initialize():
 
     return db, scope_chain, rewrite_chain, answer_chain, OUT_OF_SCOPE_REPLY
 
-def ask_shopassist(question, chat_history):
+def ask_shopassist(question, chat_history, *, intent_checked=False):
     db, scope_chain, rewrite_chain, answer_chain, OUT_OF_SCOPE_REPLY = _initialize()
     chat_history = chat_history[-MAX_HISTORY_MESSAGES:]
 
@@ -221,7 +221,9 @@ def ask_shopassist(question, chat_history):
     question = question.strip()
 
     # CHECK SCOPE USING BASE QWEN
-    scope_result = scope_chain.invoke({
+    # The deployed wrapper performs the richer retrieval-intent decision first.
+    # Controlled A/B baseline calls retain the original scope classifier.
+    scope_result = "IN_SCOPE" if intent_checked else scope_chain.invoke({
         "question": question,
         "chat_history": chat_history
     }).content.strip().upper()

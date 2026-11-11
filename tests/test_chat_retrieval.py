@@ -9,7 +9,7 @@ from src.config import Settings
 from src.ingestion import IngestionService
 from src.ollama_client import ModelUnavailable
 from src.retrieval import Retriever, bm25, rrf
-from src.schemas import Answer, Scope, Verification
+from src.schemas import Answer, QueryIntent, Verification
 from src.store import Store
 from src.verification import GroundingVerifier, validate_citations
 from tests.test_ingestion import FakeVector
@@ -30,8 +30,8 @@ class Model:
     def structured(self, model, messages, schema, **kwargs):
         if self.fail:
             raise ModelUnavailable("unavailable")
-        if schema is Scope:
-            return Scope(label="IN_SCOPE")
+        if schema is QueryIntent:
+            return QueryIntent(intent="KNOWLEDGE")
         if schema is Answer:
             self.generations += 1
             return Answer(answer=self.chunk["text"], answerable=True, needs_human_support=False, reason=None,
