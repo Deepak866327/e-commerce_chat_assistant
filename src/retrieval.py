@@ -9,6 +9,7 @@ import re
 import time
 
 from src.chunking import token_count
+from src.faq_catalog import published_faqs
 from src.security import suspicious
 
 
@@ -107,10 +108,8 @@ class Retriever:
         # FAQ question variants improve lexical recall but always resolve back
         # to the official chunk. Draft/rejected/outdated FAQs never enter search.
         if hybrid and rows:
-            faq_rows = self.store.rows("""SELECT f.chunk_id,f.body FROM faqs f JOIN documents d ON d.id=f.document_id
-                WHERE f.status='PUBLISHED' AND d.deleted=0 AND d.active_version=f.version_id""")
-            faq_search = [{"id": r["chunk_id"], "text": json.loads(r["body"])["question"] + " " + json.loads(r["body"])["answer"]}
-                          for r in faq_rows if r["chunk_id"] in by_id]
+            faq_search = [{"id": r["chunk_id"], "text": r["body"]["question"] + " " + r["body"]["answer"]}
+                          for r in published_faqs(self.store) if r["chunk_id"] in by_id]
             keyword = rrf([keyword, bm25(query, faq_search, self.settings.keyword_k)], self.settings.rrf_k)[:self.settings.keyword_k]
         fused = rrf([dense, keyword], self.settings.rrf_k) if hybrid else dense
         dense_scores, keyword_scores = dict(dense), dict(keyword)
