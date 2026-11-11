@@ -65,7 +65,7 @@ class FAQPublicationTests(unittest.TestCase):
         with self.store.connect() as conn:
             body["category"] = "  Returns  "
             conn.execute("UPDATE faqs SET body=? WHERE id=?", (encode(body), self.faq_id))
-        self.assertEqual(customer_faqs(self.store), [{"faq_id": self.faq_id,
+        self.assertEqual([{k: a[k] for k in ("faq_id", "question", "answer", "category")} for a in customer_faqs(self.store)], [{"faq_id": self.faq_id,
                          "question": body["question"], "answer": body["answer"], "category": "Returns"}])
         with self.store.connect() as conn:
             body["category"] = None

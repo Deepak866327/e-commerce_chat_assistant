@@ -1,12 +1,13 @@
 """One publication gate for customer suggestions, retrieval and FAQ exports."""
 
 import json
+from hashlib import sha256
 
 from src.security import suspicious
 
 
 def published_faqs(store):
-    rows = store.rows("""SELECT f.id,f.chunk_id,f.body FROM faqs f
+    rows = store.rows("""SELECT f.id,f.chunk_id,f.version_id,f.body FROM faqs f
         JOIN documents d ON d.id=f.document_id
         JOIN chunks c ON c.id=f.chunk_id AND c.document_id=f.document_id AND c.version_id=f.version_id
         WHERE f.status='PUBLISHED' AND f.reviewer IS NOT NULL AND TRIM(f.reviewer)<>'' AND d.deleted=0
@@ -23,7 +24,7 @@ def published_faqs(store):
         if not all(isinstance(text, str) and text.strip() and not suspicious(text)
                    for text in (question, answer)):
             continue
-        published.append({"id": row["id"], "chunk_id": row["chunk_id"], "body": body})
+        published.append({"id": row["id"], "chunk_id": row["chunk_id"], "version_id": row["version_id"], "body": body})
     return published
 
 
@@ -42,6 +43,13 @@ def customer_faqs(store):
         category = body.get("category")
         if not isinstance(category, str) or not category.strip() or suspicious(category):
             category = "General"
-        articles.append({"faq_id": row["id"], "question": body["question"],
-                         "answer": body["answer"], "category": category.strip()})
+        articles.append(versioned_article({"faq_id": row["id"], "question": body["question"],
+                         "answer": body["answer"], "category": category.strip(),
+                         "source_version": row["version_id"], "chunk_id": row["chunk_id"],
+                         "kind": "published"}))
     return articles
+
+
+def versioned_article(article):
+    version = sha256(json.dumps(article, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return {**article, "version": version}

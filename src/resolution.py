@@ -9,6 +9,7 @@ from hashlib import sha256
 import json
 import re
 import secrets
+from difflib import SequenceMatcher
 from uuid import uuid4
 
 from src.conversation import conversational_reply
@@ -81,6 +82,16 @@ class ResolutionService:
                 state = self.fresh(context)
             else:
                 state["context"] = context
+            # Only accept an ID/revision resolved against the current server catalog.
+            # Answers supplied by clients are never adopted as policy evidence.
+            from src.customer_faq import CustomerFAQs
+            faq_reference = supplied.get("faq_reference") if isinstance(supplied, dict) else None
+            faq = CustomerFAQs(self.store, self.settings).context(faq_reference) if faq_reference else None
+            previous_faq = context.get("faq") or {}
+            faq_followup = bool(faq and ((previous_faq.get("faq_id"), previous_faq.get("version"), previous_faq.get("outcome"))
+                                        != (faq["faq_id"], faq["version"], "not_helpful")))
+            if faq:
+                context["faq"] = faq
             if context["ticket_reference"]:
                 ticket = conn.execute("SELECT status FROM tickets WHERE reference=? AND session_hash=?", (context["ticket_reference"], self.owner)).fetchone()
                 if not ticket or ticket["status"] in {"RESOLVED", "CLOSED"}:
@@ -155,6 +166,8 @@ class ResolutionService:
             # A negative answer to a requested detail is never a failed-outcome signal.
             detail_is_boolean = state["phase"] == "awaiting_detail" and state["pending_slot"] in {"dispatch_status", "refund_approval"}
             unresolved = not detail_is_boolean and (normalized in NO or bool(NO_HELP.search(normalized)))
+            if unresolved and context.get("faq") and context["faq"].get("outcome") == "shown":
+                context["faq"]["outcome"] = "not_helpful"
             threshold = bool(unresolved and state["attempts"] >= self.settings.support_max_attempts
                              and not conversation and not suspicious(question) and not human_mention)
             version = (row["version"] if row else 0) + 1
@@ -171,7 +184,7 @@ class ResolutionService:
             query += " before dispatch" if dispatch.startswith("not dispatched") else " after dispatch"
         requested = explicit_handoff(question) or bool(conversation and conversation.get("reason") == "explicit_handoff")
         return {**context, "_resolution_version": version, "_resolution_direct": "requested_handoff" if requested else consent or ("resolved" if explicit_resolution else
-                "exhausted" if threshold else None), "force_knowledge": force_knowledge,
+                "exhausted" if threshold else "faq_followup" if faq_followup else None), "force_knowledge": force_knowledge,
                 "search_question": "What is the " + query + "?" if query else ""}
 
     def finish(self, result, prepared, language):
@@ -185,6 +198,8 @@ class ResolutionService:
                 return {**result, "needs_human_support": False, "stale_turn": True}, None
             state = json.loads(row["body"])
             context = state["context"]
+            if prepared.get("_faq_shown"):
+                context["faq"] = {**prepared["_faq_shown"], "outcome": "shown"}
             reason = result.get("reason")
             explicit = reason in {"explicit_handoff", "user_requested"} or result.get("route") == "human_support"
             direct = prepared.get("_resolution_direct")
@@ -204,9 +219,14 @@ class ResolutionService:
             elif state["phase"] == "handed_off" and not requires_ticket(result):
                 pass
             else:
-                needs_help = requires_ticket(result)
+                needs_help = requires_ticket(result) or direct == "faq_followup"
                 fingerprint = sha256(" ".join(result.get("answer", "").casefold().split()).encode()).hexdigest()
                 repeated = fingerprint in [item["fingerprint"] for item in state["guidance"]]
+                faq = context.get("faq")
+                if faq and faq.get("outcome") == "not_helpful":
+                    repeated = repeated or SequenceMatcher(None, " ".join(result.get("answer", "").casefold().split()),
+                                                           " ".join(faq["answer"].casefold().split())).ratio() >= .8
+                result["repeated_guidance"] = repeated
                 if needs_help:
                     result["failure_reason"] = reason or "unanswered"
                     state["failures"] = (state.get("failures", []) + [result["failure_reason"]])[-3:]
@@ -261,7 +281,7 @@ class ResolutionService:
                                 "max_attempts": self.settings.support_max_attempts, "asked": state["asked"], "issue_id": state["issue_id"]}
         result["resolution_summary"] = {"customer_reported": context["customer_reported"], "facts": context["reported_facts"],
                                         "attempts": state["attempts"], "asked": state["asked"], "guidance": state["guidance"],
-                                        "failures": state.get("failures", [])}
+                                        "failures": state.get("failures", []), "faq": context.get("faq")}
         return result, version
 
     @staticmethod
@@ -290,6 +310,6 @@ class ResolutionService:
             if row:
                 body = json.loads(row["body"])
                 body.update({key: result[key] for key in ("answer", "answerable", "sources", "needs_human_support", "reason",
-                    "route", "resolution", "ticket", "ticket_error", "verification") if key in result})
+                    "route", "resolution", "ticket", "ticket_error", "verification", "resolution_summary", "repeated_guidance") if key in result})
                 conn.execute("UPDATE traces SET body=? WHERE id=? AND session_hash=?",
                              (encode(redact_value(body)), result["query_id"], self.owner))

@@ -233,8 +233,34 @@ key. Ticket creation queues the request; it does not promise an immediate human 
 The customer **Help center · Frequently asked questions** panel offers search,
 topic filters and expandable approved answers. Opening or searching articles does
 not call a model, create tickets or consume support attempts. **I still need help**
-sends the FAQ topic into the normal chat flow for follow-up assistance. Answers are
+saves feedback and sends the FAQ ID and revision into the support flow. The server
+loads the corresponding answer itself, asks a relevant detail first, and remembers
+the unsuccessful article through later replies and any agent handoff. Answers are
 shown in their reviewed language; the chat language selector controls chat replies.
+
+**This helped** records article feedback without submitting a chat turn or marking
+an unrelated active issue resolved. Votes are retained per session and article
+revision, so repeated clicks update a vote rather than inflate the count. Reviewers
+and admins can see **FAQ helpfulness** in Staff workspace, including confirmed chat
+resolutions, escalated issues and detected repeated guidance. These are retained
+feedback/support outcomes, not proof that a backend action was completed.
+
+FAQ search combines keyword matching with the configured local embedding model.
+If its dependencies or cached weights are missing, keyword search still works.
+No Ollama call is needed to read saved articles. FAQ vectors are cached by article
+revision; edited or withdrawn content is excluded by the publication gate before
+search. Restart after provisioning missing embedding weights.
+
+In English chat, an unambiguous exact approved FAQ question can return the saved
+answer with its source citation without a generation call. Active troubleshooting,
+human requests and account actions retain their normal routes. Other chat languages
+use the usual answer pipeline so the requested language is preserved. Semantic
+auto-answers are available behind `SHOPASSIST_FAQ_SEMANTIC_ANSWERS=true`, but stay off
+by default until evaluated on your paraphrases and difficult negative examples.
+The similarity and runner-up margin settings are retrieval heuristics, not calibrated
+confidence probabilities. Low-confidence, ambiguous and personally qualified queries
+use RAG instead. Only current published policy FAQs qualify for automatic answers;
+built-in general help does not substitute for a store-specific policy.
 
 Fresh deployments show six built-in general-help FAQs (orders, delivery, returns,
 refunds, payments and support), with search and topic filters immediately available.

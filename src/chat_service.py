@@ -40,6 +40,8 @@ customer confirms it. Human support is available through this chat's ticket queu
 reported details and approved evidence. Do not repeat guidance already tried. Do not ask follow-up
 questions or say a ticket was created: the support flow adds one next question or performs handoff.
 If the latest message is a short answer, use reported context to address the original issue.
+The faq field records an article previously shown to the customer, not current policy evidence.
+If its outcome is not_helpful, do not repeat the article; address the reported blocker using supplied evidence.
 """
 
 
@@ -68,7 +70,11 @@ def history_messages(history, support_context=None):
         if context["customer_reported"]:
             # Extra memory has its own byte budget and keeps the original issue.
             while len(json.dumps(context, ensure_ascii=False).encode("utf-8")) > 1500:
-                if context["assistant_attempts"]:
+                if context.get("faq") and len(context["faq"].get("answer", "")) > 250:
+                    context["faq"]["answer"] = context["faq"]["answer"][:250]
+                elif context.get("faq") and len(context["faq"].get("question", "")) > 150:
+                    context["faq"]["question"] = context["faq"]["question"][:150]
+                elif context["assistant_attempts"]:
                     context["assistant_attempts"].pop(0)
                 elif context["steps_tried"]:
                     context["steps_tried"].pop(0)
@@ -76,6 +82,8 @@ def history_messages(history, support_context=None):
                     context["reported_facts"].popitem()
                 elif len(context["customer_reported"]) > 1:
                     context["customer_reported"].pop(1)
+                elif context.get("faq"):
+                    context["faq"] = None
                 else:
                     context["customer_reported"][0] = context["customer_reported"][0][:100]
             result.insert(0, {"role": "user", "content": json.dumps(

@@ -45,6 +45,10 @@ class Settings:
     ticket_encryption_key: str = field(default="", repr=False)
     ticket_retention_days: int = 90
     support_max_attempts: int = 3
+    faq_search_min_similarity: float = 0.55
+    faq_answer_min_similarity: float = 0.90
+    faq_answer_margin: float = 0.12
+    faq_semantic_answers: bool = False
 
     def __post_init__(self):
         if self.pipeline not in {"grounded", "legacy"}:
@@ -60,6 +64,8 @@ class Settings:
             raise ValueError("Invalid timeout or similarity threshold")
         if self.support_max_attempts not in {2, 3}:
             raise ValueError("support_max_attempts must be 2 or 3")
+        if not 0 <= self.faq_search_min_similarity <= self.faq_answer_min_similarity <= 1 or not 0 <= self.faq_answer_margin <= 1:
+            raise ValueError("Invalid FAQ similarity thresholds")
 
     @classmethod
     def from_env(cls):

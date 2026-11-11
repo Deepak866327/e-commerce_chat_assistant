@@ -142,6 +142,9 @@ def _initialize():
         or claim a support ticket was created; the support flow manages the next step.
     16. If the context does not answer the question, say verified policy
         information is unavailable instead of inferring an answer.
+    17. An faq record in history is an article previously shown to the customer,
+        not current policy evidence. If its outcome is not_helpful, address the
+        blocker using retrieved evidence instead of repeating that article.
 
     EXAMPLE:
 
@@ -268,6 +271,9 @@ def ask_shopassist(question, chat_history, *, intent_checked=False, response_lan
         rewritten_question = question
 
     # B. RETRIEVE RELEVANT PDF CHUNKS
+
+    if intent_checked and search_question:
+        rewritten_question = search_question
 
     docs = db.similarity_search(
         rewritten_question,

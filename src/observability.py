@@ -47,12 +47,18 @@ class Monitor:
             conn.execute("DELETE FROM traces WHERE id IN (SELECT id FROM traces ORDER BY created_at DESC LIMIT -1 OFFSET ?)", (self.settings.max_traces,))
 
     def summary(self):
-        rows = self.store.rows("SELECT body FROM traces")
+        rows = self.store.rows("SELECT id,body FROM traces")
         traces = [json.loads(r["body"]) for r in rows]
+        faq_ids = {r["id"] for r, trace in zip(rows, traces) if trace.get("event_type") == "faq_feedback"}
+        faq_feedback = self.store.rows("SELECT trace_id,kind FROM feedback")
+        traces = [trace for trace in traces if trace.get("event_type") != "faq_feedback"]
         total = len(traces)
         return {"queries": total,
                 "escalations": sum(bool(t.get("needs_human_support")) for t in traces),
                 "verification_failures": sum(t.get("verification", {}).get("passed") is False for t in traces),
                 "errors": sum(bool(t.get("error")) for t in traces),
                 "average_latency_seconds": sum(t.get("latency_seconds", 0) for t in traces) / total if total else None,
-                "feedback": self.store.rows("SELECT kind,COUNT(*) AS count FROM feedback GROUP BY kind")}
+                "feedback": self.store.rows("SELECT kind,COUNT(*) AS count FROM feedback WHERE trace_id IN "
+                                             "(SELECT id FROM traces WHERE json_extract(body,'$.event_type') IS NOT 'faq_feedback') GROUP BY kind"),
+                "faq_feedback": {"helpful": sum(f["kind"] == "helpful" for f in faq_feedback if f["trace_id"] in faq_ids),
+                                 "not_helpful": sum(f["kind"] == "not_helpful" for f in faq_feedback if f["trace_id"] in faq_ids)}}

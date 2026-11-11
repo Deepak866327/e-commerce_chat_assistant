@@ -187,10 +187,16 @@ def faq_suggestions(limit=5):
 
 
 def faq_articles():
-    from src.faq_catalog import customer_faqs
+    from src.customer_faq import CustomerFAQs
     settings = Settings.from_env()
     store = Store(settings.state_dir / "control.sqlite3")
-    return customer_faqs(store)
+    return CustomerFAQs(store, settings).articles()
+
+
+def submit_faq_feedback(reference, outcome, session):
+    from src.customer_faq import CustomerFAQs
+    settings = Settings.from_env()
+    return CustomerFAQs(Store(settings.state_dir / "control.sqlite3"), settings).feedback(reference, outcome, session)
 
 
 def _support_request(call, question, history, session, response_language, support_context):
@@ -205,9 +211,40 @@ def _support_request(call, question, history, session, response_language, suppor
         if prepared.get("_resolution_direct"):
             from src.security import rate_limit
             rate_limit(store, session, settings.requests_per_minute)
-            return _escalate(question, history, session, {"answer": "", "sources": [], "route": "support_followup",
+            result = {"answer": "", "sources": [], "route": "support_followup",
                 "needs_human_support": False, "query_id": None, "search_query": "",
-                "retrieval_required": False, "retrieval_performed": False}, response_language, prepared)
+                "retrieval_required": False, "retrieval_performed": False}
+            result["query_id"] = Monitor(store, settings).trace(session, {"question": question, **result})
+            return _escalate(question, history, session, result, response_language, prepared)
+        # Only clear, general knowledge questions may use a saved answer. Active
+        # troubleshooting, action requests and human requests keep their normal routes.
+        from src.intent_rules import deterministic_intent
+        if (response_language == "en" and deterministic_intent(question) == "KNOWLEDGE"
+                and not prepared.get("force_knowledge") and not prepared.get("faq")
+                and not prepared.get("steps_tried")
+                and len(prepared.get("customer_reported", [])) <= 1):
+            from src.customer_faq import CustomerFAQs
+            from src.faq_search import clear_match
+            article = clear_match([a for a in CustomerFAQs(store, settings).articles() if a["kind"] == "published"], question, settings=settings)
+            if article:
+                from src.security import rate_limit
+                rate_limit(store, session, settings.requests_per_minute)
+                import json
+                metadata = json.loads(store.rows("SELECT metadata FROM chunks WHERE id=?", (article["chunk_id"],))[0]["metadata"])
+                citations = [{"document_id": metadata["document_id"], "chunk_id": article["chunk_id"],
+                              "page_number": metadata.get("page_number")}]
+                label = metadata.get("source", metadata["document_id"])
+                if metadata.get("page_number") is not None:
+                    label += f", page {metadata['page_number']}"
+                result = {"answer": article["answer"], "answerable": True,
+                    "sources": citations if call is _ask_structured else [label], "citations": citations,
+                    "route": "faq", "needs_human_support": False, "reason": None, "search_query": question,
+                    "retrieval_required": True, "retrieval_performed": True, "faq": article,
+                    "verification": {"passed": article["kind"] == "published", "reason": "saved_approved_faq" if article["kind"] == "published" else "general_help"}}
+                result["query_id"] = Monitor(store, settings).trace(session, {"question": question, **result})
+                # Remember the article shown without treating it as already failed.
+                prepared["_faq_shown"] = article
+                return _escalate(question, history, session, result, response_language, prepared)
         return call(question, history, session, response_language=response_language, support_context=prepared)
     except PermissionError:
         return _escalate(question, history, session, {"answer": message("resolution_rate_limited", response_language),

@@ -30,11 +30,21 @@ def clean_context(context):
                         "tracking_update", "expected_delivery", "item_problem", "delivery_date", "product_problem",
                         "purchase_date", "steps_attempted", "blocker", "issue_details"}
              and isinstance(value, str) and not suspicious(value)} if isinstance(facts, dict) else {}
+    faq = context.get("faq")
+    if isinstance(faq, dict):
+        faq = {key: redact(faq[key])[:limit] for key, limit in
+               {"faq_id": 100, "version": 64, "question": 500, "answer": 2000, "category": 100,
+                "kind": 30, "source_version": 100, "chunk_id": 100, "outcome": 20}.items()
+               if isinstance(faq.get(key), str) and not suspicious(faq[key])}
+        if not all(faq.get(key) for key in ("faq_id", "version", "question", "answer")):
+            faq = None
+    else:
+        faq = None
     return {"issue_type": topic if isinstance(topic, str) and topic in TOPICS else None,
             "customer_reported": reports("customer_reported"), "steps_tried": reports("steps_tried"),
             "resolution": "customer_reported_resolved" if context.get("resolution") == "customer_reported_resolved" else "unknown",
             "ticket_reference": reference if isinstance(reference, str) and re.fullmatch(r"SA-[A-F0-9]{16}", reference) else None,
-            "reported_facts": facts, "assistant_attempts": reports("assistant_attempts")[-3:]}
+            "reported_facts": facts, "assistant_attempts": reports("assistant_attempts")[-3:], "faq": faq}
 
 
 def remember_customer(context, question):

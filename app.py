@@ -5,7 +5,7 @@ from uuid import uuid4
 import streamlit as st
 from src.config import Settings
 from src.support_context import remember_customer, remember_result
-from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist, submit_feedback, faq_articles, reset_support_resolution
+from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist, submit_feedback, faq_articles, submit_faq_feedback, reset_support_resolution
 from src.faq_ui import render_faq_help
 from src.speech_controls import speech_controls_html
 from src.voice import MAX_AUDIO_SECONDS, SAMPLE_RATE, SpeechInputError, transcribe_recording
@@ -29,6 +29,7 @@ def clear_conversation():
     st.session_state.support_context = {}
     st.session_state.pop("pending_voice_question", None)
     st.session_state.pop("pending_faq_question", None)
+    st.session_state.pop("pending_faq_context", None)
     reset_voice_input()
 
 
@@ -39,8 +40,22 @@ def send_voice_question():
         reset_voice_input()
 
 
-def send_faq_question(question):
-    st.session_state.pending_faq_question = question
+def handle_faq_feedback(article, outcome):
+    try:
+        # Revalidate the article on the server before accepting feedback/context.
+        current = submit_faq_feedback({"faq_id": article["faq_id"], "version": article["version"]},
+                                      outcome, st.session_state.support_session)
+    except ValueError as error:
+        st.session_state.faq_feedback_notice = str(error)
+        return
+    except Exception:
+        logger.error("FAQ feedback could not be saved")
+        st.session_state.faq_feedback_notice = "Your feedback could not be saved. Please try again or ask us in chat."
+        return
+    st.session_state.faq_votes[article["faq_id"] + article["version"]] = outcome
+    if outcome == "not_helpful":
+        st.session_state.pending_faq_context = {"faq_id": current["faq_id"], "version": current["version"]}
+        st.session_state.pending_faq_question = f"{current['question']} I have read the FAQ and still need help with my situation."
 
 
 def render_message(message, index):
@@ -152,6 +167,8 @@ def main():
         "support_session": uuid4().hex,
         "support_tickets": [],
         "support_context": {},
+        "faq_votes": {},
+        "faq_feedback_notice": None,
     }
     for name, value in defaults.items():
         st.session_state.setdefault(name, value)
@@ -178,7 +195,7 @@ def main():
         render_staff_workspace()
         return
 
-    render_faq_help(faq_articles, send_faq_question)
+    render_faq_help(faq_articles, handle_faq_feedback)
 
     for index, message in enumerate(st.session_state.messages):
         render_message(message, index)
@@ -188,13 +205,16 @@ def main():
         render_voice_input(language[speech_language])
 
     typed_question = st.chat_input("Ask about shipping, returns, refunds...")
-    question = (st.session_state.pop("pending_voice_question", None)
-                or st.session_state.pop("pending_faq_question", None) or typed_question)
+    voice_question = st.session_state.pop("pending_voice_question", None)
+    faq_question = st.session_state.pop("pending_faq_question", None) if not voice_question else None
+    question = voice_question or faq_question or typed_question
     if not question or not question.strip():
         return
     question = question.strip()
 
     pending_context = remember_customer(st.session_state.support_context, question)
+    if faq_question and st.session_state.get("pending_faq_context"):
+        pending_context["faq_reference"] = st.session_state.pop("pending_faq_context")
     user_message = {"role": "user", "content": question}
     render_message(user_message, len(st.session_state.messages))
     try:

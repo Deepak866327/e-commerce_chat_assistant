@@ -8,6 +8,8 @@ from unittest.mock import Mock, patch
 from streamlit.testing.v1 import AppTest
 
 from src.voice import SpeechInputError, Transcription
+from src.faq_catalog import versioned_article
+from src.default_help import starter_faqs
 
 
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
@@ -27,7 +29,9 @@ class VoiceAppTests(unittest.TestCase):
         pipeline.submit_feedback = Mock()
         pipeline.reset_support_resolution = Mock()
         self.suggestions = Mock(return_value=[])
-        pipeline.faq_articles = self.suggestions
+        pipeline.faq_articles = lambda: [versioned_article(a) for a in self.suggestions()]
+        self.faq_feedback = pipeline.submit_faq_feedback = Mock(side_effect=lambda ref, outcome, session: next(
+            a for a in (pipeline.faq_articles() or starter_faqs()) if a["faq_id"] == ref["faq_id"] and a["version"] == ref["version"]))
         self.stack.enter_context(patch.dict("sys.modules", {"src.rag_memory": pipeline}))
         self.transcribe = self.stack.enter_context(patch(
             "src.voice.transcribe_recording",
@@ -109,6 +113,7 @@ class VoiceAppTests(unittest.TestCase):
         self.assertFalse(self.app.exception)
         self.assertIn("How do I request a return?", self.answer.call_args.args[0])
         self.assertIn("still need help", self.answer.call_args.args[0])
+        self.assertEqual(self.answer.call_args.kwargs["support_context"]["faq_reference"]["faq_id"], "FAQ_one")
         self.assertEqual(len(self.app.session_state["messages"]), 2)
         self.app.run()
         self.answer.assert_called_once()
@@ -121,6 +126,24 @@ class VoiceAppTests(unittest.TestCase):
         next(field for field in self.app.text_input if field.label == "Search help articles").set_value("refund").run()
         self.assertTrue(any(item.label == "My refund has not arrived. What should I check?" for item in self.app.expander))
         self.assertEqual(self.app.session_state["messages"], [])
+        self.answer.assert_not_called()
+
+    def test_helpful_faq_records_feedback_without_chat_or_resolution_attempts(self):
+        next(button for button in self.app.button if button.key == "faq-helpful-starter-cancel").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertTrue(any("glad this article helped" in item.value for item in self.app.success))
+        self.faq_feedback.assert_called_once()
+        self.assertEqual(self.faq_feedback.call_args.args[1], "helpful")
+        self.answer.assert_not_called()
+        self.assertEqual(self.app.session_state["support_context"], {})
+        self.app.run()
+        self.faq_feedback.assert_called_once()
+
+    def test_changed_faq_does_not_send_stale_context(self):
+        self.faq_feedback.side_effect = ValueError("This article has changed.")
+        next(button for button in self.app.button if button.key == "faq-help-starter-cancel").click().run()
+        self.assertFalse(self.app.exception)
+        self.assertTrue(any("article has changed" in item.value for item in self.app.warning))
         self.answer.assert_not_called()
 
     def test_starter_faq_continues_in_chat_once(self):

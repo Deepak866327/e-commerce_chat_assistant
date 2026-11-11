@@ -6,6 +6,7 @@ Published store articles take precedence over this starter catalog.
 
 
 def starter_faqs():
+    from src.faq_catalog import versioned_article
     content = [
         ("cancel", "Orders", "How can I cancel my order?",
          "1. Check the order confirmation or your account for the order’s current status.\n"
@@ -37,5 +38,6 @@ def starter_faqs():
          "After a support ticket is created, check **Your support tickets** and use **Refresh ticket** to see replies.\n\n"
          "A ticket places your request in the support queue; it does not guarantee an immediate response."),
     ]
-    return [{"faq_id": "starter-" + key, "category": category, "question": question, "answer": answer}
+    return [versioned_article({"faq_id": "starter-" + key, "category": category, "question": question,
+                              "answer": answer, "kind": "general"})
             for key, category, question, answer in content]
