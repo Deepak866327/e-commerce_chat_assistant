@@ -32,7 +32,7 @@ ticket workspace. This continuation preserves those implementations.
    Obvious completed/promised backend-action claims are rejected. Flags are
    heuristic, so human review must check meaning, policy conditions and capability
    claims that the patterns miss. Preparation does not train or replace weights.
-6. A 24-case synthetic development routing set separates general policies from
+6. A 25-case synthetic development routing set separates general policies from
    complaints/actions, Hindi/Hinglish requests, negation and contextual follow-ups.
    Offline execution reports model cases as skipped, not passed. This set stays
    separate from production FAQs and human-reviewed release evaluation data.
@@ -50,8 +50,8 @@ python scripts/evaluate_support_routes.py
 ```
 
 Baseline: 76 offline tests passed on the current upstream source. Final executed
-results are recorded in the pull request. The route fixture has 10 deterministic
-shortcut cases and 14 model cases. Tests also exercise real SQLite operations,
+results are recorded in the pull request. The route fixture has 17 deterministic
+conversation/procedure cases and 8 model cases. Tests also exercise real SQLite operations,
 source ingestion and Streamlit UI behavior using simulated inference.
 
 Local Ollama is unavailable and the external fine-tuned GGUF is absent. Prompt
@@ -67,8 +67,8 @@ are unchanged. Grounded generation now identifies its prompt as
 
 The comprehensive runner uses the configured utility, fine-tuned answer and
 verifier models through the real Ollama API. It records their exact digests,
-executes all 24 routing cases, builds a temporary dense/BM25 candidate index from
-the repository policy PDFs, and exercises 10 actual answer/abstention/action cases.
+executes all 25 routing cases, builds a temporary dense/BM25 candidate index from
+the repository policy PDFs, and exercises 11 actual answer/abstention/action cases.
 It saves answers, cited evidence, verification results, failures and timings.
 Only cached embeddings are used; it never downloads replacement model weights,
 activates an index or writes production tickets/data. Reports are checkpointed
@@ -100,7 +100,7 @@ never a passing result. The remote machine/endpoint must be reachable from the
 environment that runs this command; a laptop's localhost is not this workspace.
 
 1. On the model host, run `python scripts/evaluate_support_routes.py --model-backed`.
-   Diagnose all 14 real-classifier cases and add observed customer failures.
+   Diagnose all 8 real-classifier cases and add observed customer failures.
 2. Human-review the existing policy benchmark drafts and representative English,
    Hindi and Hinglish examples; keep held-out evaluation separate from training.
 3. Use the existing A–E/embedding/chunk experiments and release gates to measure

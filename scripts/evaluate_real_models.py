@@ -32,6 +32,7 @@ ANSWER_CASES = [
     {"id": "unsupported-fee", "question": "What is ShopAssist's premium membership annual fee?", "language": "en", "answerable": False},
     {"id": "refund-action", "question": "My refund is 20 days overdue. Please expedite it.", "language": "en", "answerable": False, "route": "account_action"},
     {"id": "cancel-action", "question": "Cancel my order for me", "language": "en", "answerable": False, "route": "account_action"},
+    {"id": "cancel-procedure", "question": "How can I cancel my order?", "language": "en", "answerable": True, "route": "knowledge"},
     {"id": "declined-agent-policy", "question": "I do not want an agent; explain your return policy", "language": "en", "answerable": True},
 ]
 

@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import ROOT, Settings
 from src.conversation import conversational_reply
+from src.intent_rules import deterministic_intent
 from src.query_routing import classify_query
 
 
@@ -19,6 +20,8 @@ def run_cases(cases, client=None, settings=None):
         if reply:
             route = {"human_support": "HUMAN_SUPPORT", "clarification": "CLARIFICATION"}.get(reply["route"], "CONVERSATION")
             result = {"id": case["id"], "actual": route, "model_backed": False}
+        elif deterministic_intent(case["question"]) is not None:
+            result = {"id": case["id"], "actual": deterministic_intent(case["question"]), "model_backed": False}
         elif client is None:
             result = {"id": case["id"], "skipped": "local_model_not_requested"}
         else:

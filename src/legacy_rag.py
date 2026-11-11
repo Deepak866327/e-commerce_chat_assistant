@@ -1,6 +1,7 @@
 # Frozen pre-upgrade pipeline for controlled baseline evaluation only.
 from pathlib import Path
 from src.language import language_instruction, message
+from src.policy_answer import generate_policy_answer
 
 from langchain_ollama import ChatOllama
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -296,14 +297,21 @@ def ask_shopassist(question, chat_history, *, intent_checked=False, response_lan
 
     # D. CALL FINE-TUNED QWEN
 
-    response = answer_chain.invoke({
+    payload = {
         "question": question,
         "context": context,
         "response_language": language_instruction(response_language),
         "chat_history": chat_history
-    })
-
-    answer = response.content
+    }
+    if intent_checked:
+        answer = generate_policy_answer(answer_chain, payload, [doc.page_content for doc in docs])
+        if answer is None:
+            return {"answer": message("abstention", response_language),
+                    "sources": [], "search_query": rewritten_question,
+                    "answerable": False, "needs_human_support": True, "reason": "unsupported_policy_numbers"}
+    else:
+        # Keep the controlled pre-upgrade baseline unmodified.
+        answer = answer_chain.invoke(payload).content
 
     return {
         "answer": answer,
