@@ -186,6 +186,13 @@ def faq_suggestions(limit=5):
     return published_suggestions(store, limit)
 
 
+def faq_articles():
+    from src.faq_catalog import customer_faqs
+    settings = Settings.from_env()
+    store = Store(settings.state_dir / "control.sqlite3")
+    return customer_faqs(store)
+
+
 def _support_request(call, question, history, session, response_language, support_context):
     from src.resolution import ResolutionService
     if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000:

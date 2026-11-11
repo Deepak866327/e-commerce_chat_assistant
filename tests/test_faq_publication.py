@@ -8,7 +8,7 @@ import unittest
 
 from src.config import Settings
 from src.faq import FAQService
-from src.faq_catalog import published_suggestions
+from src.faq_catalog import customer_faqs, published_suggestions
 from src.ingestion import IngestionService
 from src.retrieval import Retriever
 from src.security import Principal
@@ -47,6 +47,7 @@ class FAQPublicationTests(unittest.TestCase):
 
     def assert_visible(self, visible):
         self.assertEqual(bool(published_suggestions(self.store)), visible)
+        self.assertEqual(bool(customer_faqs(self.store)), visible)
         self.assertEqual(bool(self.service.published()), visible)
         self.assertEqual(bool(self.retriever.search("beacon")["chunks"]), visible)
 
@@ -56,6 +57,20 @@ class FAQPublicationTests(unittest.TestCase):
         self.assert_visible(True)
         self.service.transition(self.faq_id, "PENDING_REVIEW", self.reviewer)
         self.assert_visible(False)
+
+    def test_customer_article_exposes_reviewed_answer_and_safe_category(self):
+        self.publish()
+        row = self.store.rows("SELECT body FROM faqs WHERE id=?", (self.faq_id,))[0]
+        body = json.loads(row["body"])
+        with self.store.connect() as conn:
+            body["category"] = "  Returns  "
+            conn.execute("UPDATE faqs SET body=? WHERE id=?", (encode(body), self.faq_id))
+        self.assertEqual(customer_faqs(self.store), [{"faq_id": self.faq_id,
+                         "question": body["question"], "answer": body["answer"], "category": "Returns"}])
+        with self.store.connect() as conn:
+            body["category"] = None
+            conn.execute("UPDATE faqs SET body=? WHERE id=?", (encode(body), self.faq_id))
+        self.assertEqual(customer_faqs(self.store)[0]["category"], "General")
 
     def test_edit_removes_published_alias_immediately(self):
         self.publish()

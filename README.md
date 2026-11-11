@@ -230,9 +230,18 @@ Replies are available in the current browser session; click **Refresh ticket** t
 check for a staff response. Optional contact details require a configured encryption
 key. Ticket creation queues the request; it does not promise an immediate human reply.
 
-FAQ suggestions appear after a human reviews and publishes the generated drafts.
-Clicking a question sends it through the normal chat pipeline. Generated drafts,
-rejected FAQs and evaluation data never appear as customer suggestions. See the
+The customer **Help center · Frequently asked questions** panel offers search,
+topic filters and expandable approved answers. Opening or searching articles does
+not call a model, create tickets or consume support attempts. **I still need help**
+sends the FAQ topic into the normal chat flow for follow-up assistance. Answers are
+shown in their reviewed language; the chat language selector controls chat replies.
+
+To populate the panel, open **Staff workspace**, generate drafts from current policy
+chunks, review and edit the answers and categories, select **Approve reviewed FAQ**,
+then have an admin select **Publish approved FAQ**. Only reviewed, verified FAQs
+whose source version is still active appear. Edits, withdrawal or source changes
+remove the article on the next interaction without rebuilding the index. Generated drafts,
+rejected FAQs and evaluation data never appear in the help center. See the
 [runbook](docs/AI_PLATFORM_RUNBOOK.md) for staff credentials and worker setup.
 
 - [Audit](docs/AI_UPGRADE_AUDIT.md)

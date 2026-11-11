@@ -32,3 +32,16 @@ def published_suggestions(store, limit=5):
         raise ValueError("Choose 1–10 FAQ suggestions")
     return [{"faq_id": row["id"], "question": row["body"]["question"]}
             for row in published_faqs(store)[:limit]]
+
+
+def customer_faqs(store):
+    """Public help articles share the same current-source gate as retrieval."""
+    articles = []
+    for row in published_faqs(store):
+        body = row["body"]
+        category = body.get("category")
+        if not isinstance(category, str) or not category.strip() or suspicious(category):
+            category = "General"
+        articles.append({"faq_id": row["id"], "question": body["question"],
+                         "answer": body["answer"], "category": category.strip()})
+    return articles

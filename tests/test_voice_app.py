@@ -27,7 +27,7 @@ class VoiceAppTests(unittest.TestCase):
         pipeline.submit_feedback = Mock()
         pipeline.reset_support_resolution = Mock()
         self.suggestions = Mock(return_value=[])
-        pipeline.faq_suggestions = self.suggestions
+        pipeline.faq_articles = self.suggestions
         self.stack.enter_context(patch.dict("sys.modules", {"src.rag_memory": pipeline}))
         self.transcribe = self.stack.enter_context(patch(
             "src.voice.transcribe_recording",
@@ -102,17 +102,48 @@ class VoiceAppTests(unittest.TestCase):
         self.assertEqual(self.transcribe.call_args.kwargs["language"], "hi")
 
     def test_published_faq_button_sends_question_once_through_normal_chat(self):
-        self.suggestions.return_value = [{"faq_id": "FAQ_one", "question": "How do I request a return?"}]
+        self.suggestions.return_value = [{"faq_id": "FAQ_one", "question": "How do I request a return?", "answer": "Open your orders and select Return.", "category": "Returns"}]
         self.app.run()
-        self.button("How do I request a return?").click().run()
+        self.answer.assert_not_called()
+        self.button("I still need help").click().run()
         self.assertFalse(self.app.exception)
-        self.assertEqual(self.answer.call_args.args[0], "How do I request a return?")
+        self.assertIn("How do I request a return?", self.answer.call_args.args[0])
+        self.assertIn("still need help", self.answer.call_args.args[0])
         self.assertEqual(len(self.app.session_state["messages"]), 2)
         self.app.run()
         self.answer.assert_called_once()
 
     def test_empty_published_catalog_does_not_show_faq_buttons(self):
-        self.assertFalse(any(header.value == "Frequently asked questions" for header in self.app.subheader))
+        self.assertTrue(any("being prepared" in item.value for item in self.app.info))
+        self.assertFalse(any(button.label == "I still need help" for button in self.app.button))
+
+    def test_faq_search_topics_and_publication_refresh_do_not_send_chat(self):
+        self.suggestions.return_value = [
+            {"faq_id": "return", "question": "How do I return?", "answer": "Use the returns page.", "category": "Returns"},
+            {"faq_id": "ship", "question": "When does it arrive?", "answer": "Express delivery takes two days.", "category": "Shipping"},
+        ]
+        self.app.run()
+        self.assertTrue(any(item.value == "Use the returns page." for item in self.app.markdown))
+        next(field for field in self.app.text_input if field.label == "Search help articles").set_value("EXPRESS days").run()
+        self.assertEqual([item.label for item in self.app.expander if item.label in {"How do I return?", "When does it arrive?"}], ["When does it arrive?"])
+        next(field for field in self.app.selectbox if field.label == "Browse by topic").select("Returns").run()
+        self.assertTrue(any("No matching" in item.value for item in self.app.info))
+        # Withdrawn articles disappear on the next rerun, including a stale topic selection.
+        self.suggestions.return_value = [self.suggestions.return_value[1]]
+        self.app.run()
+        self.assertFalse(self.app.exception)
+        self.assertEqual(self.app.session_state["faq_category"], "All topics")
+        self.assertEqual(self.app.session_state["messages"], [])
+        self.assertEqual(self.app.session_state["support_context"], {})
+        self.answer.assert_not_called()
+
+    def test_faq_load_failure_leaves_chat_available(self):
+        self.suggestions.side_effect = RuntimeError("Unavailable")
+        self.app.run()
+        self.assertFalse(self.app.exception)
+        self.assertTrue(any("temporarily unavailable" in item.value for item in self.app.info))
+        self.app.chat_input[0].set_value("Help with my order").run()
+        self.answer.assert_called_once()
 
     def test_chat_language_is_independent_of_speech_language(self):
         next(select for select in self.app.selectbox if select.label == "Chat language").select("English").run()

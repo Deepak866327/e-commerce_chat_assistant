@@ -5,7 +5,8 @@ from uuid import uuid4
 import streamlit as st
 from src.config import Settings
 from src.support_context import remember_customer, remember_result
-from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist, submit_feedback, faq_suggestions, reset_support_resolution
+from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist, submit_feedback, faq_articles, reset_support_resolution
+from src.faq_ui import render_faq_help
 from src.speech_controls import speech_controls_html
 from src.voice import MAX_AUDIO_SECONDS, SAMPLE_RATE, SpeechInputError, transcribe_recording
 from src.support_ui import remember_ticket, render_customer_support, render_staff_workspace
@@ -170,22 +171,14 @@ def main():
         response_language = {"Hinglish": "hinglish", "English": "en", "Hindi": "hi"}[chat_language]
         st.caption("Voice recordings are transcribed locally using a small multilingual model.")
         st.caption("Read-aloud voices depend on your browser and device.")
-        try:
-            suggestions = faq_suggestions()
-        except Exception:
-            logger.error("FAQ suggestions are temporarily unavailable")
-            suggestions = []
-        if suggestions:
-            st.subheader("Frequently asked questions")
-            for suggestion in suggestions:
-                st.button(suggestion["question"], key="faq-" + suggestion["faq_id"],
-                          on_click=send_faq_question, args=(suggestion["question"],))
         render_customer_support()
         staff_mode = st.toggle("Staff workspace", value=False)
 
     if staff_mode:
         render_staff_workspace()
         return
+
+    render_faq_help(faq_articles, send_faq_question)
 
     for index, message in enumerate(st.session_state.messages):
         render_message(message, index)
