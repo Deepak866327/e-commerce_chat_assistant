@@ -1,79 +1,27 @@
+"""Compatible script entry point; see python -m src.admin for managed operations."""
 
 from pathlib import Path
+import sys
 
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# Project paths
-PDF_FOLDER = Path("data/policies")
-VECTOR_DB_PATH = "./vector_store"
-COLLECTION_NAME = "shopassist_policies"
+from src.config import ROOT, Settings
+from src.documents import SUPPORTED
+from src.ingestion import IngestionService
+from src.vector_index import ChromaIndex
 
-# --------------------------------------------------
-# STEP 1: PDF LOADING
-# --------------------------------------------------
 
-documents = []
+def main():
+    settings = Settings.from_env()
+    service = IngestionService(settings, vector=ChromaIndex(settings))
+    files = sorted(p for p in (ROOT / "data" / "policies").iterdir() if p.suffix.lower() in SUPPORTED)
+    if not files:
+        raise FileNotFoundError("No supported documents inside data/policies/")
+    for path in files:
+        print(service.ingest(path))
+    print("Candidate index ready. Validate against reviewed data before activation. Legacy index preserved.")
 
-pdf_files = sorted(PDF_FOLDER.glob("*.pdf"))
 
-if not pdf_files:
-    raise FileNotFoundError(
-        "No PDF found inside data/policies/"
-    )
-
-for pdf_file in pdf_files:
-    print(f"Loading: {pdf_file.name}")
-
-    loader = PyPDFLoader(str(pdf_file))
-    pages = loader.load()
-
-    documents.extend(pages)
-
-print(f"\nTotal pages loaded: {len(documents)}")
-
-# --------------------------------------------------
-# STEP 2: CHUNKING
-# --------------------------------------------------
-
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,
-    chunk_overlap=100,
-    separators=["\n\n", "\n", ". ", " ", ""]
-)
-
-chunks = text_splitter.split_documents(documents)
-
-print(f"Total chunks created: {len(chunks)}")
-
-# --------------------------------------------------
-# STEP 3: FREE EMBEDDING MODEL
-# --------------------------------------------------
-
-embedding_model = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
-
-# --------------------------------------------------
-# STEP 4: CHROMADB VECTOR STORAGE
-# --------------------------------------------------
-
-vector_db = Chroma(
-    collection_name=COLLECTION_NAME,
-    embedding_function=embedding_model,
-    persist_directory=VECTOR_DB_PATH
-)
-
-# Remove old indexed records before re-ingesting
-existing_records = vector_db.get()
-
-if existing_records["ids"]:
-    vector_db.delete(ids=existing_records["ids"])
-
-# Generate embeddings and store documents
-vector_db.add_documents(documents=chunks)
-
-print("\nSuccessfully stored chunks in ChromaDB!")
-print("Total stored chunks:", vector_db._collection.count())
+if __name__ == "__main__":
+    main()

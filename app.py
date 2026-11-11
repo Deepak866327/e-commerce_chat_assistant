@@ -1,10 +1,10 @@
 from hashlib import sha256
 import logging
+from uuid import uuid4
 
 import streamlit as st
-from langchain_core.messages import AIMessage, HumanMessage
-
-from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist
+from src.config import Settings
+from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist, submit_feedback
 from src.speech_controls import speech_controls_html
 from src.voice import MAX_AUDIO_SECONDS, SAMPLE_RATE, SpeechInputError, transcribe_recording
 
@@ -45,6 +45,21 @@ def render_message(message, index):
                 speech_controls_html(message["content"], f"reply-{index}"),
                 unsafe_allow_javascript=True,
             )
+            if message.get("needs_human_support"):
+                st.caption("Contact the customer support team for further assistance.")
+            if message.get("query_id"):
+                with st.expander("Rate this answer"):
+                    with st.form(f"feedback-{message['query_id']}"):
+                        kind = st.selectbox("Feedback", ["helpful", "not_helpful", "incorrect_answer",
+                                                          "missing_information", "outdated_information"],
+                                            format_func=lambda value: value.replace("_", " ").capitalize())
+                        comment = st.text_input("Details (optional)", max_chars=2000)
+                        if st.form_submit_button("Submit feedback"):
+                            try:
+                                submit_feedback(message["query_id"], kind, comment, st.session_state.support_session)
+                                st.success("Feedback recorded for review.")
+                            except (ValueError, PermissionError):
+                                st.warning("Feedback could not be saved for this conversation.")
 
 
 def render_voice_input(language):
@@ -105,6 +120,12 @@ def render_voice_input(language):
 
 def main():
     st.set_page_config(page_title="ShopAssist AI", page_icon="🛍️", layout="centered")
+    if Settings.from_env().require_login and not st.user.is_logged_in:
+        st.title("ShopAssist AI")
+        st.write("Sign in to contact support.")
+        if st.button("Sign in"):
+            st.login()
+        st.stop()
     st.title("ShopAssist AI")
     st.caption("Your AI-powered shopping support assistant")
 
@@ -115,6 +136,7 @@ def main():
         "voice_transcript": "",
         "voice_recording_digest": None,
         "voice_feedback": None,
+        "support_session": uuid4().hex,
     }
     for name, value in defaults.items():
         st.session_state.setdefault(name, value)
@@ -150,20 +172,23 @@ def main():
     render_message(user_message, len(st.session_state.messages))
     try:
         with st.spinner("ShopAssist is thinking..."):
-            result = ask_shopassist(question, st.session_state.chat_history)
-    except Exception as error:
-        st.error(f"Something went wrong: {error}")
+            result = ask_shopassist(question, st.session_state.chat_history, st.session_state.support_session)
+    except Exception:
+        logger.error("Chat request failed")
+        st.error("Support is temporarily unavailable. Please try again shortly.")
         return
 
     assistant_message = {
         "role": "assistant",
         "content": result["answer"],
         "sources": result["sources"],
+        "query_id": result.get("query_id"),
+        "needs_human_support": result.get("needs_human_support", False),
     }
     render_message(assistant_message, len(st.session_state.messages) + 1)
     st.session_state.messages.extend([user_message, assistant_message])
     st.session_state.chat_history.extend(
-        [HumanMessage(content=question), AIMessage(content=result["answer"])]
+        [{"role": "user", "content": question}, {"role": "assistant", "content": result["answer"]}]
     )
     st.session_state.chat_history = st.session_state.chat_history[-MAX_HISTORY_MESSAGES:]
 

@@ -22,6 +22,8 @@ htmlcov/
 /recordings/
 /generated_audio/
 /data/evaluation/
+/data/platform/
+/docs/reports/local/
 
 # Local credentials and configuration
 .env

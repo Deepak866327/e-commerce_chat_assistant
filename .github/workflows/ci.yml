@@ -1,0 +1,26 @@
+name: offline-correctness
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  offline:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.14']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -r requirements-test.txt
+      - run: python -m compileall -q app.py src scripts tests
+      - run: python -m unittest discover -v
+      - run: python -m pip check
+      - run: git diff --check
+# Model-backed release evaluation is an explicit deployment gate, not an offline
+# CI success claim. It requires local Ollama, external weights and reviewed data.

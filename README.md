@@ -63,7 +63,10 @@ The repository includes policy PDFs in `data/policies/`. Build the local Chroma 
 .\.venv\Scripts\python.exe src/ingest.py
 ```
 
-The first run downloads `sentence-transformers/all-MiniLM-L6-v2` for embeddings. The script stores the index in `vector_store/`, which is generated locally and excluded from Git. Run ingestion again after changing the PDFs; it replaces the existing indexed records.
+The upgraded script stages versioned knowledge in a separate Chroma collection and
+preserves existing records. Enable `SHOPASSIST_ALLOW_MODEL_DOWNLOAD=true` only
+during initial model provisioning. New indexes require a reviewed evaluation
+before activation; see [the platform runbook](docs/AI_PLATFORM_RUNBOOK.md).
 
 ### 3. Start the application
 
@@ -154,3 +157,36 @@ data/policies/                Policy documents
 - **Model not found:** Check `ollama list` and complete the model preparation steps above.
 - **ChromaDB is empty:** Run `src/ingest.py` from the project root before launching the application.
 - **Model artifact missing:** Obtain the custom GGUF separately and place it next to `models/Modelfile` before running `ollama create`.
+
+## Versioned AI platform upgrade
+
+The existing Python, Streamlit, Chroma and Ollama architecture is retained. The
+upgrade adds document versions, PDF/DOCX/TXT/CSV/approved-FAQ ingestion, optional
+table extraction/OCR, token chunks, grounded FAQ generation and human review,
+BM25/dense fusion, optional CPU BGE reranking, structured answers, citation checks,
+independent verification, safe abstention, feedback and local monitoring.
+
+Evaluation data is stored separately from production knowledge. The repository
+includes **54 unreviewed benchmark drafts**, not 300 approved cases or measured
+quality improvements. Ragas/DeepEval are optional local-model judge adapters.
+Signed reports, regression checks and index rollback support controlled releases.
+
+There was no admin frontend; operations extend the Python project through
+`python -m src.admin --help`. No second web application or external database was
+introduced. SQLite holds transactional workflow state; Chroma still holds vectors.
+
+- [Audit](docs/AI_UPGRADE_AUDIT.md)
+- [Plan](docs/AI_UPGRADE_PLAN.md)
+- [Progress and remaining validation](docs/AI_UPGRADE_PROGRESS.md)
+- [Operations, evaluation and deployment](docs/AI_PLATFORM_RUNBOOK.md)
+
+Run offline checks with `python -m unittest discover -v` and
+`python -m compileall -q app.py src scripts tests`. Optional extraction/OCR and
+evaluation dependencies are in `requirements-ocr.txt` and `requirements-eval.txt`.
+`python scripts/offline_audit.py` generates extraction and chunk-structure reports.
+
+Existing deployments can explicitly set `SHOPASSIST_PIPELINE=legacy` while staging
+the upgrade. This preserves the previous customer answer pipeline and collection;
+its replies do **not** carry the new grounding guarantee. The default `grounded`
+pipeline requires an activated index. Production boot through `scripts/serve.py`
+checks a signed release report and the actual Ollama model digest.

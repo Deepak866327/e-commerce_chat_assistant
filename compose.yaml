@@ -1,0 +1,27 @@
+services:
+  shopassist:
+    build: .
+    ports:
+      - "127.0.0.1:8501:8501"
+    environment:
+      SHOPASSIST_OLLAMA_URL: http://host.docker.internal:11434
+      SHOPASSIST_REQUIRE_LOGIN: "true"
+      SHOPASSIST_ALLOW_MODEL_DOWNLOAD: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data/platform:/app/data/platform
+      - ./vector_store:/app/vector_store
+      - ./models/speech:/app/models/speech
+      # Add a read-only secrets.toml mount after configuring your identity provider.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 4g
+    cpus: 2
+    pids_limit: 256
+    restart: unless-stopped

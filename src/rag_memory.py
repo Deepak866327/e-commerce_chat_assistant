@@ -1,289 +1,82 @@
-from pathlib import Path
+"""Stable chat entry points. Model/vector loading happens only on a request."""
 
-from langchain_ollama import ChatOllama
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
+from functools import lru_cache
+import logging
 
-from langchain_core.prompts import (
-    ChatPromptTemplate,
-    MessagesPlaceholder
-)
+from src.chat_service import ChatService, MAX_HISTORY_MESSAGES
+from src.config import Settings
+from src.observability import Monitor
+from src.ollama_client import OllamaClient
+from src.retrieval import BGEReranker, Retriever
+from src.store import Store
+from src.vector_index import ChromaIndex, IndexUnavailable
+from src.verification import GroundingVerifier
 
-# ==========================================
-# STEP 1: INITIALIZE EMBEDDING MODEL
-# ==========================================
-
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
-
-# ==========================================
-# STEP 2: CONNECT CHROMADB
-# ==========================================
-
-db = Chroma(
-    collection_name="shopassist_policies",
-    embedding_function=embeddings,
-    persist_directory="./vector_store"
-)
-
-stored_chunks = db._collection.count()
-
-if stored_chunks == 0:
-    raise RuntimeError(
-        "ChromaDB is empty. Run python src/ingest.py first."
-    )
-
-# ==========================================
-# STEP 3: INITIALIZE OLLAMA MODELS
-# ==========================================
-
-rewrite_llm = ChatOllama(
-    model="qwen2.5:1.5b",
-    temperature=0,
-    num_ctx=2048
-)
-
-answer_llm = ChatOllama(
-    model="shopassist-finetuned",
-    temperature=0,
-    num_ctx=4096
-)
-# ==========================================
-# STEP 4: QUERY REWRITING PROMPT
-# ==========================================
-
-rewrite_prompt = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        """You are a search query rewriting assistant.
-
-        Your ONLY task is to rewrite the latest
-        customer message into a standalone search question.
-
-        STRICT RULES:
-        1. Return exactly one question.
-        2. Never answer the question.
-        3. Never provide policy facts or numbers
-           unless explicitly present in the question.
-        4. Use chat history only to understand references.
-        5. Keep the rewritten question in English.
-        6. Return only the rewritten question.
-        7. End your output with a question mark.
-
-        EXAMPLE 1:
-        Previous question: What is standard shipping time?
-        Latest question: And express?
-        Output: What is the express shipping time?
-
-        EXAMPLE 2:
-        Previous question: What is the return policy?
-        Latest question: What about damaged items?
-        Output: What is the return policy for damaged items?
-
-        EXAMPLE 3:
-        Previous question: What is the warranty period?
-        Latest question: Does it cover water damage?
-        Output: Does the warranty cover water damage?
-        """
-    ),
-    MessagesPlaceholder(variable_name="chat_history"),
-    (
-        "human",
-        "Rewrite this as a standalone search question: {question}"
-    )
-])
-
-rewrite_chain = rewrite_prompt | rewrite_llm
-
-# ==========================================
-# STEP 5: FINAL ANSWER PROMPT
-# ==========================================
-
-SYSTEM_RULES = """
-You are ShopAssist AI, a customer support assistant.
-
-STRICT INSTRUCTIONS:
-
-1. Answer in natural Hinglish (Hindi + English).
-2. For company policy facts, use ONLY the retrieved
-   policy context.
-3. Do not add unrelated policy information.
-4. Do not invent timelines, charges, eligibility
-   conditions, or company contact details.
-5. Never claim to have checked an order, processed
-   a refund, expedited a refund, or cancelled an order.
-6. If the customer asks you to perform an action
-   requiring backend access, clearly explain that
-   you cannot perform it directly.
-7. If verified policy information is unavailable,
-   say:
-   "Mere paas iski verified policy information nahi hai."
-8. Answer the customer's specific question directly.
-9. Keep answers concise, preferably 2-4 sentences.
-10. Do not treat chat history as verified policy facts.
-
-EXAMPLE:
-
-Customer: My refund is delayed. Can you expedite it?
-
-Assistant: Main directly refund expedite nahi kar sakta,
-kyunki mere paas refund processing system ka access nahi
-hai. Agar refund expected timeline se zyada delayed hai,
-toh aap support team se refund status verify karwa sakte
-hain.
-"""
-
-answer_prompt = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        SYSTEM_RULES
-        + "\n\nVERIFIED POLICY CONTEXT:\n{context}"
-    ),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{question}")
-])
-
-answer_chain = answer_prompt | answer_llm
-
-# ==========================================
-# OUT-OF-SCOPE GUARDRAIL
-# ==========================================
-
-scope_prompt = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        """You classify customer messages for an
-e-commerce customer support chatbot.
-
-Return ONLY one label:
-IN_SCOPE or OUT_OF_SCOPE.
-
-IN_SCOPE includes:
-- Orders and order tracking
-- Shipping and delivery
-- Returns, refunds and exchanges
-- Order cancellation
-- Product warranty
-- Payments and shopping support
-- Greetings and clarification related to support
-
-OUT_OF_SCOPE includes:
-- General knowledge
-- Coding and programming
-- Mathematics
-- Politics and entertainment
-- Questions unrelated to customer support
-
-Use conversation history to interpret follow-ups.
-
-Return only the label."""
-    ),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{question}")
-])
-
-scope_chain = scope_prompt | rewrite_llm
-
-OUT_OF_SCOPE_REPLY = (
-    "Main ShopAssist customer support assistant hoon. "
-    "Main sirf orders, shipping, returns, refunds, "
-    "cancellations aur warranty se related questions "
-    "mein help kar sakta hoon."
-)
-
-# ==========================================
-# STEP 6: CONVERSATION MEMORY
-# ==========================================
-
-# Last 8 messages = approximately 4 turns
-MAX_HISTORY_MESSAGES = 8
+logger = logging.getLogger(__name__)
 
 
-# ==========================================
-# STEP 7: ANSWER CUSTOMER QUESTIONS
-# ==========================================
+@lru_cache(maxsize=2)
+def _vector(settings, index_id):
+    return ChromaIndex(settings, index_id)
 
-def ask_shopassist(question, chat_history):
 
-    question = question.strip()
+def runtime():
+    settings = Settings.from_env()
+    store = Store(settings.state_dir / "control.sqlite3")
+    monitor = Monitor(store, settings)
+    active_index = store.setting("active_index")
+    vector = _vector(settings, active_index) if active_index else None
+    reranker = BGEReranker(settings) if settings.use_reranker and active_index else None
+    client = OllamaClient(settings)
+    retriever = Retriever(store, settings, vector, reranker)
+    return ChatService(store, settings, client, retriever,
+                       GroundingVerifier(client, settings.verifier_model), monitor)
 
-    # CHECK SCOPE USING BASE QWEN
-    scope_result = scope_chain.invoke({
-        "question": question,
-        "chat_history": chat_history
-    }).content.strip().upper()
 
-    if scope_result != "IN_SCOPE":
-        return {
-            "answer": OUT_OF_SCOPE_REPLY,
-            "search_query": question,
-            "sources": []
-        }
+def ask_structured(question, chat_history=None, session="local"):
+    """Public structured contract. Citation sources are verified objects."""
+    try:
+        return runtime().ask(question, chat_history, session)
+    except IndexUnavailable:
+        # Keep the UI operational when models/indexes need installation. Do not
+        # serve a different model/dimension behind the active collection name.
+        from src.chat_service import ABSTENTION
+        return {"answer": ABSTENTION, "answerable": False, "sources": [],
+                "needs_human_support": True, "reason": "index_unavailable", "search_query": question,
+                "query_id": None, "verification": {"passed": False}, "confidence": None}
 
-    # A. REWRITE FOLLOW-UP QUESTION
 
-    if chat_history:
-        rewritten_question = rewrite_chain.invoke({
-            "question": question,
-            "chat_history": chat_history
-        }).content.strip()
+def ask_shopassist(question, chat_history, session="local"):
+    """Preserve answer/search_query/display-source keys used by existing callers."""
+    settings = Settings.from_env()
+    if settings.pipeline == "legacy":
+        # Explicit migration mode lets existing deployments retain their working
+        # collection while new indexes and human-reviewed evaluations are staged.
+        # This mode makes no upgraded-grounding or verified-citation claim.
+        from src.legacy_rag import ask_shopassist as legacy_ask
+        from langchain_core.messages import AIMessage, HumanMessage
+        from src.chat_service import history_messages
+        history = [(HumanMessage if m["role"] == "user" else AIMessage)(content=m["content"])
+                   for m in history_messages(chat_history)]
+        store = Store(settings.state_dir / "control.sqlite3")
+        monitor = Monitor(store, settings)
+        from src.security import rate_limit
+        rate_limit(store, session, settings.requests_per_minute)
+        result = legacy_ask(question, history)
+        result.update(pipeline="legacy", confidence=None, needs_human_support=False,
+                      verification={"passed": False, "reason": "legacy_pipeline_not_verified"})
+        result["query_id"] = monitor.trace(session, {"question": question, **result})
+        return result
+    result = ask_structured(question, chat_history, session)
+    citations = result["sources"]
+    filenames = {c["id"]: c["metadata"].get("source", c["metadata"]["document_id"])
+                 for c in result.get("retrieved_chunks", [])}
+    displayed = [f"{filenames.get(s['chunk_id'], s['document_id'])}, page {s['page_number']}"
+                 if s["page_number"] is not None else filenames.get(s["chunk_id"], s["document_id"]) for s in citations]
+    return {**result, "sources": displayed, "citations": citations}
 
-        if (
-            not rewritten_question
-            or not rewritten_question.endswith("?")
-            or len(rewritten_question) > 300
-        ):
-            rewritten_question = question
-    else:
-        rewritten_question = question
 
-    # B. RETRIEVE RELEVANT PDF CHUNKS
-
-    docs = db.similarity_search(
-        rewritten_question,
-        k=3
-    )
-
-    # C. PREPARE CONTEXT FOR LLM
-
-    context_parts = []
-    unique_sources = set()
-
-    for doc in docs:
-        filename = Path(
-            doc.metadata.get("source", "unknown")
-        ).name
-
-        page = doc.metadata.get("page", 0) + 1
-
-        context_parts.append(
-            f"Source: {filename}, Page: {page}\n"
-            f"{doc.page_content}"
-        )
-
-        unique_sources.add((filename, page))
-
-    context = "\n\n".join(context_parts)
-
-    if not context:
-        context = "No relevant policy information found."
-
-    # D. CALL FINE-TUNED QWEN
-
-    response = answer_chain.invoke({
-        "question": question,
-        "context": context,
-        "chat_history": chat_history
-    })
-
-    answer = response.content
-
-    return {
-        "answer": answer,
-        "search_query": rewritten_question,
-        "sources": [
-            f"{filename}, page {page}"
-            for filename, page in sorted(unique_sources)
-        ]
-    }
+def submit_feedback(query_id, kind, comment="", session="local"):
+    settings = Settings.from_env()
+    store = Store(settings.state_dir / "control.sqlite3")
+    return Monitor(store, settings).feedback(query_id, kind, comment, session)
