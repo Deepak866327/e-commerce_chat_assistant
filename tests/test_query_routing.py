@@ -93,7 +93,7 @@ class QueryRoutingTests(unittest.TestCase):
                  patch("src.rag_memory.classify_query", return_value=intent), \
                  patch.dict("sys.modules", {"src.legacy_rag": legacy}):
                 result = ask_shopassist("An arbitrary routed customer message", [], "routing-tests")
-                self.assertEqual(result["route"], intent.lower())
+                self.assertEqual(result["route"], "support_followup" if intent == "ACCOUNT_ACTION" else intent.lower())
                 self.assertFalse(result["retrieval_performed"])
                 self.assertEqual(result["sources"], [])
                 legacy.ask_shopassist.assert_not_called()
@@ -111,9 +111,9 @@ class QueryRoutingTests(unittest.TestCase):
             result = ask_shopassist("And express?", history, "routing-tests")
             self.assertTrue(result["retrieval_performed"])
             self.assertTrue(result["sources"])
-            self.assertEqual(classify.call_args.args[-1], history)
+            self.assertEqual(classify.call_args.args[-1][-len(history):], history)
             self.assertTrue(legacy.ask_shopassist.call_args.kwargs["intent_checked"])
-            self.assertEqual(legacy.ask_shopassist.call_args.args[1][0].content, history[0]["content"])
+            self.assertEqual(legacy.ask_shopassist.call_args.args[1][-1].content, history[0]["content"])
 
     def test_filter_failure_does_not_trigger_retrieval(self):
         from src.rag_memory import ask_shopassist
@@ -123,7 +123,8 @@ class QueryRoutingTests(unittest.TestCase):
              patch("src.rag_memory.classify_query", side_effect=ModelUnavailable("offline")), \
              patch.dict("sys.modules", {"src.legacy_rag": legacy}):
             result = ask_shopassist("A question that needs routing", [], "routing-tests")
-            self.assertEqual(result["reason"], "intent_filter_unavailable")
+            self.assertEqual(result["failure_reason"], "intent_filter_unavailable")
+            self.assertNotIn("ticket", result)
             self.assertFalse(result["retrieval_performed"])
             legacy.ask_shopassist.assert_not_called()
 
@@ -135,3 +136,33 @@ class QueryRoutingTests(unittest.TestCase):
         messages = client.structured.call_args.args[1]
         self.assertEqual(messages[1:-1], history)
         self.assertEqual(messages[-1], {"role": "user", "content": "And express?"})
+
+    def test_hindi_handoff_and_negation_work_without_a_model(self):
+        from src.rag_memory import ask_shopassist
+        for question in ("mujhe customer care se baat karni hai", "मुझे एजेंट से बात करनी है"):
+            with self.subTest(question=question), \
+                 patch("src.rag_memory.Settings.from_env", return_value=self.settings), \
+                 patch("src.rag_memory.runtime", side_effect=AssertionError("No model required")):
+                result = ask_shopassist(question, [], "hindi-handoff")
+                self.assertEqual(result["route"], "human_support")
+                self.assertIn("ticket", result)
+        for question in ("I do not want to talk to a human", "I don't want to talk to a human",
+                         "mujhe agent se baat nahi karni", "मुझे एजेंट से बात नहीं करनी"):
+            with self.subTest(question=question), patch("src.rag_memory.Settings.from_env", return_value=self.settings):
+                result = ask_shopassist(question, [], "declined-handoff")
+                self.assertFalse(result["needs_human_support"])
+                self.assertNotIn("ticket", result)
+        self.assertIsNone(conversational_reply("No agent please; what is your refund policy?"))
+
+    def test_action_requests_ask_one_relevant_question_without_policy_claims(self):
+        from src.query_routing import response_without_retrieval
+        for question, expected in (("My refund is overdue. Expedite it.", "refund approval"),
+                                   ("Cancel my order", "dispatch"),
+                                   ("My payment failed", "error message"),
+                                   ("Where is my package?", "tracking update")):
+            with self.subTest(question=question):
+                answer = response_without_retrieval("ACCOUNT_ACTION", question)
+                self.assertIn(expected, answer.answer)
+                self.assertTrue(answer.needs_human_support)
+                self.assertEqual(answer.sources, [])
+                self.assertEqual(answer.answer.count("?"), 1)

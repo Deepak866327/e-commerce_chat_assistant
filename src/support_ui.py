@@ -111,6 +111,19 @@ def render_staff_tickets(tickets, principal):
     labels = {r["reference"]: f"{r['reference']} · {r['status']} · {json.loads(r['payload'])['question'][:80]}" for r in rows}
     reference = st.selectbox("Support ticket", list(labels), format_func=labels.get)
     ticket = tickets.detail(reference, principal)
+    brief = ticket["payload"].get("agent_brief")
+    if brief:
+        st.subheader("Agent handoff brief")
+        st.write("Customer goal:", brief.get("customer_goal", ""))
+        st.caption("Customer-reported details · No CRM/order/payment verification has been performed")
+        for name, value in brief.get("reported_facts", {}).items():
+            st.write(name.replace("_", " ").capitalize() + ":", value)
+        st.write("Remaining blocker:", brief.get("unresolved_blocker", ""))
+        st.write("Reason for handoff:", str(brief.get("handoff_reason", "")).replace("_", " "))
+        st.write("Latest customer update:", brief.get("latest_customer_update", ""))
+        with st.expander("Steps already discussed"):
+            st.write("Customer says they tried:", brief.get("customer_steps_tried", []))
+            st.write("Bot guidance shown:", brief.get("guidance_shown", []))
     st.write(ticket["payload"]["question"])
     if ticket["payload"]["last_answer"]:
         st.caption("Last automated answer")
@@ -121,6 +134,12 @@ def render_staff_tickets(tickets, principal):
         for message in ticket["payload"]["history"]:
             st.caption(message["role"].capitalize())
             st.write(message["content"])
+        faq = ticket["payload"].get("resolution_summary", {}).get("faq")
+        if faq:
+            st.caption("FAQ already shown to this customer (reading history; check current policy)")
+            st.write(faq["question"])
+            st.write(faq["answer"])
+            st.caption(f"Article: {faq['faq_id']} · revision {faq['version'][:12]} · {faq.get('outcome', 'shown')}")
     for message in ticket["messages"]:
         st.caption("Support" if message["author"] == "SUPPORT" else "Customer")
         st.write(message["body"])
@@ -145,6 +164,21 @@ def render_staff_faqs(settings, store, principal):
     from src.ollama_client import OllamaClient
     from src.verification import GroundingVerifier
     st.subheader("FAQ generation and review")
+    from src.knowledge_quality import knowledge_gaps
+    with st.expander("Knowledge gaps to review"):
+        gaps = knowledge_gaps(store, principal)
+        if gaps:
+            st.dataframe(gaps, hide_index=True)
+            st.caption("Add the missing procedure to an approved source document, ingest it, then review and publish its FAQ. Customer messages are not policy evidence.")
+        else:
+            st.caption("Missing-evidence questions will appear here for policy review.")
+    from src.customer_faq import CustomerFAQs
+    with st.expander("FAQ helpfulness"):
+        stats = CustomerFAQs(store, settings).report(principal)
+        if stats:
+            st.dataframe(stats, hide_index=True)
+        else:
+            st.caption("Customer FAQ feedback will appear here.")
     st.button("Refresh FAQ drafts", key="refresh-faq-drafts")
     client = OllamaClient(settings)
     service = FAQService(store, settings, client, GroundingVerifier(client, settings.verifier_model))
@@ -190,10 +224,11 @@ def render_staff_faqs(settings, store, principal):
         with st.form("edit-" + faq_id):
             question = st.text_input("Question", value=body["question"], max_chars=500)
             answer = st.text_area("Answer", value=body["answer"], max_chars=3000)
+            category = st.text_input("Topic", value=body["category"], max_chars=100)
             evidence = st.text_area("Supporting source quote", value=body["supporting_text"], max_chars=6000)
             if st.form_submit_button("Save edits for review"):
                 try:
-                    service.edit(faq_id, {"question": question, "answer": answer, "supporting_text": evidence}, principal)
+                    service.edit(faq_id, {"question": question, "answer": answer, "category": category, "supporting_text": evidence}, principal)
                     st.success("Edits validated. FAQ returned to review.")
                 except (ValueError, PermissionError, RuntimeError) as error:
                     st.warning(str(error))

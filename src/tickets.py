@@ -12,7 +12,7 @@ from src.store import encode, now
 
 STATUSES = {"OPEN", "ASSIGNED", "IN_PROGRESS", "WAITING_ON_CUSTOMER", "RESOLVED", "CLOSED"}
 TERMINAL = {"RESOLVED", "CLOSED"}
-ESCALATION_REASONS = {"explicit_handoff", "account_access_required", "no_validated_knowledge",
+ESCALATION_REASONS = {"explicit_handoff", "resolution_attempts_exhausted", "account_access_required", "no_validated_knowledge",
     "insufficient_retrieval", "insufficient_evidence", "verification_failed", "invalid_model_output",
     "intent_filter_unavailable", "model_unavailable", "service_unavailable", "index_unavailable",
     "source_changed_during_generation", "generation_failed", "user_requested", "legacy_unanswered"}
@@ -29,10 +29,19 @@ def requires_ticket(result):
     text = " ".join(result.get("answer", "").casefold().replace("’", "'").split())
     # Legacy generation is plain text. Recognize its explicit inability to help,
     # not policy prohibitions such as 'you cannot return a used product'.
-    return any(phrase in text for phrase in ("verified policy information nahi", "i don't know",
+    if any(phrase in text for phrase in ("verified policy information nahi", "i don't know",
         "i do not know", "i don't have access", "i do not have access", "i don't have enough information",
         "i do not have enough information", "mere paas account access nahi", "mere paas access nahi",
-        "verified information nahi", "policy information available nahi", "जानकारी नहीं है"))
+        "verified information nahi", "policy information available nahi", "जानकारी नहीं है")):
+        # A live-access disclaimer alone does not invalidate a sourced policy
+        # answer. Explicit abstention/uncertainty must still be escalated.
+        policy_unknown = any(phrase in text for phrase in ("verified policy information nahi", "i don't know",
+            "i do not know", "i don't have enough information", "i do not have enough information",
+            "verified information nahi", "policy information available nahi", "जानकारी नहीं है"))
+        guidance = re.search(r"\byou (?:can|may|should)\b|\bfollow (?:the|these)\b|\bbefore dispatch\b|"
+                             r"aap.*(?:kar sakte|follow)|dispatch.*pehle|आप.*(?:कर सकते|करें)", text)
+        return policy_unknown or not (result.get("route") == "knowledge" and result.get("sources") and guidance)
+    return False
 
 
 class TicketService:
@@ -59,7 +68,17 @@ class TicketService:
         if not isinstance(question, str) or not question.strip() or len(question) > 2000:
             raise ValueError("Describe the issue in 1–2000 characters")
         session_hash = self._session(session)
-        dedupe = sha256(" ".join(question.casefold().split()).encode()).hexdigest()
+        from src.support_context import clean_context
+        context = clean_context(result.get("support_context"))
+        if context["ticket_reference"] and result.get("route") in {"account_action", "human_support", "handoff"}:
+            previous = self._owned(context["ticket_reference"], session)
+            if previous["status"] not in TERMINAL:
+                self.refresh_brief(previous, question, result)
+                self.reply(previous["reference"], question, session=session)
+                return self.summary(previous)
+        issue_id = result.get("resolution", {}).get("issue_id")
+        dedupe_text = "resolution:" + issue_id if isinstance(issue_id, str) and re.fullmatch(r"ISSUE_[a-f0-9]{32}", issue_id) else " ".join(question.casefold().split())
+        dedupe = sha256(dedupe_text.encode()).hexdigest()
         existing = self.store.rows("SELECT * FROM tickets WHERE session_hash=? AND dedupe_key=? AND closed_at IS NULL", (session_hash, dedupe))
         if existing:
             return self.summary(existing[0])
@@ -68,7 +87,10 @@ class TicketService:
         ticket_id, reference = "TKT_" + uuid4().hex, "SA-" + secrets.token_hex(8).upper()
         payload = redact_value({"question": question, "last_answer": result.get("answer", ""),
             "history": history[-8:], "sources": result.get("citations", result.get("sources", [])),
-            "route": result.get("route"), "verification": result.get("verification")})
+            "route": result.get("route"), "verification": result.get("verification"),
+            "customer_reported_context": context, "resolution_summary": result.get("resolution_summary", {})})
+        from src.agent_brief import agent_brief
+        payload["agent_brief"] = agent_brief(question, {**result, "reason": result.get("reason") or reason})
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute("SELECT * FROM tickets WHERE session_hash=? AND dedupe_key=? AND closed_at IS NULL", (session_hash, dedupe)).fetchone()
@@ -88,6 +110,23 @@ class TicketService:
                 body.update(needs_human_support=True, ticket={"reference": reference, "status": "OPEN"})
                 conn.execute("UPDATE traces SET body=? WHERE id=?", (encode(body), query_id))
         return {"reference": reference, "status": "OPEN", "created_at": timestamp}
+
+    def refresh_brief(self, owned_ticket, question, result):
+        from src.agent_brief import agent_brief
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT payload FROM tickets WHERE id=? AND session_hash=? AND closed_at IS NULL",
+                               (owned_ticket["id"], owned_ticket["session_hash"])).fetchone()
+            if not row:
+                return
+            payload = json.loads(row["payload"])
+            if result.get("support_context"):
+                payload["agent_brief"] = agent_brief(question, result)
+                payload["customer_reported_context"] = result["support_context"]
+                payload["resolution_summary"] = result.get("resolution_summary", payload.get("resolution_summary", {}))
+            else:
+                payload.setdefault("agent_brief", {})["latest_customer_update"] = question[:500]
+            conn.execute("UPDATE tickets SET payload=?,updated_at=? WHERE id=? AND session_hash=?",
+                         (encode(redact_value(payload)), now(), owned_ticket["id"], owned_ticket["session_hash"]))
 
     def contact(self, reference, value, session):
         ticket = self._owned(reference, session)
@@ -136,6 +175,11 @@ class TicketService:
             conn.execute("INSERT INTO ticket_messages(ticket_id,author,body,created_at) VALUES(?,?,?,?)",
                          (ticket["id"], author, redact(message.strip()), timestamp))
             conn.execute("UPDATE tickets SET updated_at=? WHERE id=?", (timestamp, ticket["id"]))
+            if principal is None:
+                payload_row = conn.execute("SELECT payload FROM tickets WHERE id=?", (ticket["id"],)).fetchone()
+                payload = json.loads(payload_row["payload"])
+                payload.setdefault("agent_brief", {})["latest_customer_update"] = redact(message.strip())[:500]
+                conn.execute("UPDATE tickets SET payload=? WHERE id=?", (encode(payload), ticket["id"]))
             conn.execute("INSERT INTO ticket_events(ticket_id,actor,action,detail,created_at) VALUES(?,?,?,?,?)",
                          (ticket["id"], principal.name if principal else "customer", "REPLIED", encode({"author": author}), timestamp))
             self.store.audit(principal.name if principal else "customer", "ticket.reply", reference, conn=conn)

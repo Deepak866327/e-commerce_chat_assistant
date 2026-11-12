@@ -71,6 +71,9 @@ CREATE TABLE IF NOT EXISTS tickets(
  reason TEXT NOT NULL, payload TEXT NOT NULL, contact_ciphertext TEXT,
  assignee TEXT, dedupe_key TEXT NOT NULL, created_at TEXT NOT NULL,
  updated_at TEXT NOT NULL, closed_at TEXT);
+CREATE TABLE IF NOT EXISTS support_sessions(
+ session_hash TEXT PRIMARY KEY, body TEXT NOT NULL, version INTEGER NOT NULL,
+ updated_at TEXT NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS active_ticket_dedupe ON tickets(session_hash,dedupe_key) WHERE closed_at IS NULL;
 CREATE TABLE IF NOT EXISTS ticket_events(
  id INTEGER PRIMARY KEY, ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
@@ -88,13 +91,14 @@ class Store:
         with self.connect() as conn:
             # Schema is additive; never drop existing data or migrate Chroma.
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version > 3:
+            if version > 4:
                 raise RuntimeError("Database is newer than this application")
             conn.executescript(SCHEMA)
             conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(1,?)", (now(),))
             conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(2,?)", (now(),))
             conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(3,?)", (now(),))
-            conn.execute("PRAGMA user_version=3")
+            conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(4,?)", (now(),))
+            conn.execute("PRAGMA user_version=4")
 
     @contextmanager
     def connect(self):

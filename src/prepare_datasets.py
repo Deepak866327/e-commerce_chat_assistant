@@ -1,169 +1,79 @@
+"""Prepare review candidates; export training splits only from reviewed examples."""
 
+import argparse
+from collections import Counter
+import csv
 import json
-import re
 from pathlib import Path
-from datasets import load_dataset
+import re
+import sys
 
-DATASET_PATH = "data/training/raw/customer_support.csv"
-OUTPUT_DIR = Path("data/training/processed")
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+from src.config import ROOT
+from src.training_review import candidate, grouped_splits, reviewed_examples
 
-# Relevant intents for e-commerce customer support
-SELECTED_INTENTS = {
-    "cancel_order",
-    "change_order",
-    "place_order",
-    "track_order",
-    "delivery_options",
-    "delivery_period",
-    "check_refund_policy",
-    "get_refund",
-    "track_refund",
-    "payment_issue",
-    "check_payment_methods",
-    "complaint",
-    "contact_customer_service",
-    "contact_human_agent",
-}
+SELECTED_INTENTS = {"cancel_order", "change_order", "place_order", "track_order", "delivery_options",
+    "delivery_period", "check_refund_policy", "get_refund", "track_refund", "payment_issue",
+    "check_payment_methods", "complaint", "contact_customer_service", "contact_human_agent"}
 
-SYSTEM_MESSAGE = (
-    "You are a helpful e-commerce customer support "
-    "assistant. Be polite, concise, and honest. "
-    "Do not invent order status, company policies, "
-    "refund amounts, or customer information. "
-    "If information requires account access, "
-    "explain that verification is needed."
-)
 
-# Load CSV
-dataset = load_dataset(
-    "csv",
-    data_files=DATASET_PATH,
-    split="train"
-)
+def valid_candidate(row):
+    return (row.get("intent") in SELECTED_INTENTS
+            and all(isinstance(row.get(key), str) and row[key].strip() for key in ("instruction", "response"))
+            and len(row["instruction"]) <= 500 and len(row["response"]) <= 2000
+            and not re.search(r"\{\{.*?\}\}", row["instruction"] + row["response"]))
 
-print("Original rows:", len(dataset))
 
-# Keep relevant intents
-dataset = dataset.filter(
-    lambda row: row["intent"] in SELECTED_INTENTS
-)
+def write_jsonl(path, rows):
+    path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
 
-print("After intent filtering:", len(dataset))
 
-# Remove missing / empty / placeholder-containing rows
-def is_valid(row):
-    instruction = row.get("instruction")
-    response = row.get("response")
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input", type=Path, default=ROOT / "data/training/raw/customer_support.csv")
+    parser.add_argument("--reviewed-file", type=Path, help="Human-reviewed JSONL, based on review_candidates.jsonl")
+    parser.add_argument("--output", type=Path, default=ROOT / "data/training/processed")
+    args = parser.parse_args(argv)
+    source = (args.reviewed_file or args.input).resolve()
+    if source.is_relative_to((ROOT / "data/benchmarks").resolve()) or source.is_relative_to((ROOT / "data/platform/evaluation").resolve()):
+        parser.error("Evaluation data must remain separate from training")
+    try:
+        if args.reviewed_file:
+            rows = [json.loads(line) for line in source.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+            examples = reviewed_examples(rows)
+            splits = grouped_splits(examples)
+            args.output.mkdir(parents=True, exist_ok=True)
+            for name, records in splits.items():
+                write_jsonl(args.output / f"{name}.jsonl", [{"messages": row["messages"]} for row in records])
+            manifest = {"reviewed_examples": len(examples), "reviewers": sorted({row["reviewer"] for row in examples}),
+                        "group_counts": {name: len({row["group_id"] for row in records}) for name, records in splits.items()},
+                        "counts": {name: len(records) for name, records in splits.items()}, "model_training_performed": False}
+            (args.output / "review_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            print(json.dumps(manifest))
+        else:
+            seen, candidates = set(), []
+            with source.open(encoding="utf-8-sig", newline="") as file:
+                for row in csv.DictReader(file):
+                    if not valid_candidate(row):
+                        continue
+                    key = " ".join(row["instruction"].casefold().split())
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    candidates.append(candidate(row))
+                    if len(candidates) == 2000:
+                        break
+            args.output.mkdir(parents=True, exist_ok=True)
+            write_jsonl(args.output / "review_candidates.jsonl", candidates)
+            flags = Counter(flag for row in candidates for flag in row["flags"])
+            print(json.dumps({"pending_review": len(candidates), "flags": dict(flags), "training_splits_written": False}))
+            print("Review/edit responses, set reviewed=true, reviewer and group_id, then run with --reviewed-file.")
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        parser.error(str(exc))
+    return 0
 
-    if not isinstance(instruction, str):
-        return False
 
-    if not isinstance(response, str):
-        return False
-
-    instruction = instruction.strip()
-    response = response.strip()
-
-    if not instruction or not response:
-        return False
-
-    # Exclude unresolved template placeholders
-    if re.search(r"\{\{.*?\}\}", instruction + response):
-        return False
-
-    if len(instruction) > 500:
-        return False
-
-    if len(response) > 2000:
-        return False
-
-    return True
-
-dataset = dataset.filter(is_valid)
-
-# Deduplicate by normalized question
-seen = set()
-unique_indices = []
-
-for index, row in enumerate(dataset):
-    key = row["instruction"].strip().lower()
-
-    if key not in seen:
-        seen.add(key)
-        unique_indices.append(index)
-
-dataset = dataset.select(unique_indices)
-
-print("After cleaning:", len(dataset))
-
-# Keep small subset for initial training experiment
-dataset = dataset.shuffle(seed=42)
-dataset = dataset.select(
-    range(min(2000, len(dataset)))
-)
-
-if len(dataset) < 20:
-    raise RuntimeError(
-        "Too few clean samples. Inspect filters and dataset."
-    )
-
-# 80% training, 10% validation, 10% test
-first_split = dataset.train_test_split(
-    test_size=0.2,
-    seed=42
-)
-
-second_split = first_split["test"].train_test_split(
-    test_size=0.5,
-    seed=42
-)
-
-splits = {
-    "train": first_split["train"],
-    "validation": second_split["train"],
-    "test": second_split["test"]
-}
-
-def to_chat_format(row):
-    return {
-        "messages": [
-            {
-                "role": "system",
-                "content": SYSTEM_MESSAGE
-            },
-            {
-                "role": "user",
-                "content": row["instruction"].strip()
-            },
-            {
-                "role": "assistant",
-                "content": row["response"].strip()
-            }
-        ]
-    }
-
-for split_name, split_data in splits.items():
-
-    output_path = OUTPUT_DIR / f"{split_name}.jsonl"
-
-    with open(
-        output_path,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        for row in split_data:
-            example = to_chat_format(row)
-            file.write(
-                json.dumps(example, ensure_ascii=False) + "\n"
-            )
-
-    print(
-        f"{split_name}: {len(split_data)} samples "
-        f"-> {output_path}"
-    )
-
-print("\nDataset preparation complete!")
-print("Review samples before training.")
+if __name__ == "__main__":
+    raise SystemExit(main())

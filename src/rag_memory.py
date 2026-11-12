@@ -4,8 +4,9 @@ from functools import lru_cache
 import logging
 import time
 
-from src.chat_service import ChatService, MAX_HISTORY_MESSAGES
+from src.chat_service import ChatService, MAX_HISTORY_MESSAGES, history_messages
 from src.config import Settings
+from src.language import message, language_instruction
 from src.conversation import conversational_reply
 from src.observability import Monitor
 from src.ollama_client import OllamaClient
@@ -36,29 +37,41 @@ def runtime():
                        GroundingVerifier(client, settings.verifier_model), monitor)
 
 
-def _escalate(question, history, session, result):
-    from src.chat_service import history_messages
-    from src.tickets import TicketService, requires_ticket
-    if result.get("ticket") or not requires_ticket(result):
+def _escalate(question, history, session, result, response_language="hinglish", support_context=None, *, settings=None):
+    from src.resolution import ResolutionService
+    from src.tickets import TicketService
+    settings = settings or Settings.from_env()
+    store = Store(settings.state_dir / "control.sqlite3")
+    flow = ResolutionService(store, settings, session)
+    prepared = support_context if isinstance(support_context, dict) and "_resolution_version" in support_context else flow.prepare(question, support_context)
+    result, version = flow.finish(result, prepared, response_language)
+    if version is None:
         return result
-    result["needs_human_support"] = True
-    reason = result.get("reason") or "legacy_unanswered"
+    if result.get("needs_human_support"):
+        try:
+            reports = result.get("resolution_summary", {}).get("customer_reported", [])
+            ticket_question = (reports[0] + "\nLatest update: " + question)[:2000] if reports else question
+            result["ticket"] = TicketService(store, settings).open(
+                ticket_question, result, history_messages(history), session, result.get("reason") or "resolution_attempts_exhausted")
+            flow.attach_ticket(result, version)
+            result["answer"] = message("resolution_backend_handoff" if result.get("reason") == "backend_action_required" else
+                                       "support_queued" if result.get("reason") in {"explicit_handoff", "existing_handoff"} else
+                                       "resolution_handoff", response_language,
+                                       reference=result["ticket"]["reference"])
+        except Exception as exc:
+            logger.error("Support ticket creation failed: %s", type(exc).__name__)
+            result["ticket_error"] = True
+            result["answer"] = message("resolution_ticket_failed", response_language)
     try:
-        settings = Settings.from_env()
-        store = Store(settings.state_dir / "control.sqlite3")
-        result["ticket"] = TicketService(store, settings).open(question, result, history_messages(history), session, reason)
-        if reason == "explicit_handoff":
-            result["answer"] = (f"Aapka support ticket {result['ticket']['reference']} bana diya gaya hai. "
-                                "Aapki request human support queue mein hai. Neeche ticket ka status aur replies check kar sakte hain.")
+        flow.update_trace(result)
     except Exception as exc:
-        logger.error("Support ticket creation failed: %s", type(exc).__name__)
-        result["ticket_error"] = True
+        logger.error("Resolution trace update failed: %s", type(exc).__name__)
     return result
 
 
-def _conversation(question, session, history=None):
+def _conversation(question, session, history=None, response_language="hinglish", support_context=None):
     started = time.perf_counter()
-    reply = conversational_reply(question)
+    reply = conversational_reply(question, response_language)
     if reply is None:
         return None
     settings = Settings.from_env()
@@ -70,34 +83,36 @@ def _conversation(question, session, history=None):
         reply["query_id"] = Monitor(store, settings).trace(session, {"question": question, **reply})
     except Exception as exc:
         logger.error("Conversation trace failed: %s", type(exc).__name__)
-    return _escalate(question, history, session, reply)
+    return _escalate(question, history, session, reply, response_language, support_context)
 
 
-def ask_structured(question, chat_history=None, session="local"):
+def _ask_structured(question, chat_history=None, session="local", *, response_language="hinglish", support_context=None):
     """Public structured contract. Citation sources are verified objects."""
     if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000:
         raise ValueError("Question must contain 1–2000 characters")
+    language_instruction(response_language)
     question = question.strip()
-    reply = _conversation(question, session, chat_history)
+    reply = _conversation(question, session, chat_history, response_language, support_context)
     if reply is not None:
         return reply
     try:
-        return _escalate(question, chat_history, session, runtime().ask(question, chat_history, session))
+        return _escalate(question, chat_history, session, runtime().ask(
+            question, chat_history, session, response_language=response_language, support_context=support_context), response_language, support_context)
     except IndexUnavailable:
         # Keep the UI operational when models/indexes need installation. Do not
         # serve a different model/dimension behind the active collection name.
-        from src.chat_service import ABSTENTION
-        return _escalate(question, chat_history, session, {"answer": ABSTENTION, "answerable": False, "sources": [],
+        return _escalate(question, chat_history, session, {"answer": message("abstention", response_language), "answerable": False, "sources": [],
                 "needs_human_support": True, "reason": "index_unavailable", "search_query": question,
-                "query_id": None, "verification": {"passed": False}, "confidence": None})
+                "query_id": None, "verification": {"passed": False}, "confidence": None}, response_language, support_context)
 
 
-def ask_shopassist(question, chat_history, session="local"):
+def _ask_shopassist(question, chat_history, session="local", *, response_language="hinglish", support_context=None):
     """Preserve answer/search_query/display-source keys used by existing callers."""
     if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000:
         raise ValueError("Question must contain 1–2000 characters")
+    language_instruction(response_language)
     question = question.strip()
-    reply = _conversation(question, session, chat_history)
+    reply = _conversation(question, session, chat_history, response_language, support_context)
     if reply is not None:
         return reply
     settings = Settings.from_env()
@@ -107,24 +122,26 @@ def ask_shopassist(question, chat_history, session="local"):
         # This mode makes no upgraded-grounding or verified-citation claim.
         from src.chat_service import history_messages
         from src.security import rate_limit, redact, suspicious
-        history = history_messages(chat_history)
+        history = history_messages(chat_history, support_context)
+        if support_context and len(history) > MAX_HISTORY_MESSAGES:
+            history = [history[0], *history[-(MAX_HISTORY_MESSAGES - 1):]]
         store = Store(settings.state_dir / "control.sqlite3")
         monitor = Monitor(store, settings)
         rate_limit(store, session, settings.requests_per_minute)
         started = time.perf_counter()
         client = OllamaClient(settings)
         if suspicious(question):
-            answer = ChatService.abstain("unsafe_request")
+            answer = ChatService.abstain("unsafe_request", response_language)
             intent = "BLOCKED"
         else:
             from src.ollama_client import InvalidModelOutput, ModelUnavailable
             try:
-                intent = classify_query(client, settings.utility_model, redact(question), history)
-                answer = response_without_retrieval(intent)
+                intent = classify_query(client, settings.utility_model, redact(question), history, support_context=support_context)
+                answer = response_without_retrieval(intent, question, response_language, support_context)
             except (InvalidModelOutput, ModelUnavailable):
                 # An unavailable filter must not trigger blind retrieval.
                 intent = "UNAVAILABLE"
-                answer = ChatService.abstain("intent_filter_unavailable")
+                answer = ChatService.abstain("intent_filter_unavailable", response_language)
         if answer is not None:
             result = {**answer.model_dump(), "search_query": "", "sources": [], "route": intent.lower(),
                       "retrieval_required": False, "retrieval_performed": False,
@@ -134,19 +151,21 @@ def ask_shopassist(question, chat_history, session="local"):
                 from src.legacy_rag import ask_shopassist as legacy_ask
                 from langchain_core.messages import AIMessage, HumanMessage
                 legacy_history = [(HumanMessage if m["role"] == "user" else AIMessage)(content=m["content"]) for m in history]
-                result = legacy_ask(question, legacy_history, intent_checked=True)
+                from src.resolution import contextual_search
+                result = legacy_ask(question, legacy_history, intent_checked=True, response_language=response_language,
+                                    search_question=contextual_search(support_context))
                 result.update(route="knowledge", retrieval_required=True, retrieval_performed=True,
-                              needs_human_support=False,
+                              needs_human_support=result.get("needs_human_support", False),
                               verification={"passed": False, "reason": "legacy_pipeline_not_verified"})
             except Exception as exc:
                 logger.error("Legacy answer failed: %s", type(exc).__name__)
-                result = {**ChatService.abstain("service_unavailable").model_dump(),
+                result = {**ChatService.abstain("service_unavailable", response_language).model_dump(),
                           "route": "knowledge", "search_query": question,
                           "retrieval_required": True, "retrieval_performed": None}
         result.update(pipeline="legacy", confidence=None, latency_seconds=time.perf_counter() - started)
         result["query_id"] = monitor.trace(session, {"question": question, **result})
-        return _escalate(question, chat_history, session, result)
-    result = ask_structured(question, chat_history, session)
+        return _escalate(question, chat_history, session, result, response_language, support_context)
+    result = _ask_structured(question, chat_history, session, response_language=response_language, support_context=support_context)
     citations = result["sources"]
     filenames = {c["id"]: c["metadata"].get("source", c["metadata"]["document_id"])
                  for c in result.get("retrieved_chunks", [])}
@@ -168,9 +187,114 @@ def faq_suggestions(limit=5):
     return published_suggestions(store, limit)
 
 
-def request_human_support(question, history=None, session="local"):
-    from src.chat_service import history_messages
-    from src.tickets import TicketService
+def faq_articles():
+    from src.customer_faq import CustomerFAQs
     settings = Settings.from_env()
     store = Store(settings.state_dir / "control.sqlite3")
-    return TicketService(store, settings).open(question, {}, history_messages(history), session, "user_requested")
+    return CustomerFAQs(store, settings).articles()
+
+
+def submit_faq_feedback(reference, outcome, session):
+    from src.customer_faq import CustomerFAQs
+    settings = Settings.from_env()
+    return CustomerFAQs(Store(settings.state_dir / "control.sqlite3"), settings).feedback(reference, outcome, session)
+
+
+def open_faq(reference, session):
+    """Resolve the selected revision server-side and deliver its saved chat answer."""
+    from src.customer_faq import CustomerFAQs
+    from src.resolution import ResolutionService
+    from src.security import rate_limit
+    import json
+    settings = Settings.from_env()
+    store = Store(settings.state_dir / "control.sqlite3")
+    rate_limit(store, session, settings.requests_per_minute)
+    article = CustomerFAQs(store, settings).resolve(reference)
+    if not article:
+        raise ValueError("This FAQ has changed. Please select its latest question from the Help Center.")
+    sources = []
+    if article.get("chunk_id"):
+        metadata = json.loads(store.rows("SELECT metadata FROM chunks WHERE id=?", (article["chunk_id"],))[0]["metadata"])
+        label = metadata.get("source", metadata["document_id"])
+        if metadata.get("page_number") is not None:
+            label += f", page {metadata['page_number']}"
+        sources.append(label)
+    return {"answer": article["answer"], "sources": sources, "faq": article,
+            "support_context": ResolutionService(store, settings, session).read_faq(article)}
+
+
+def _support_request(call, question, history, session, response_language, support_context):
+    from src.resolution import ResolutionService
+    if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000:
+        raise ValueError("Question must contain 1–2000 characters")
+    language_instruction(response_language)
+    settings = Settings.from_env()
+    store = Store(settings.state_dir / "control.sqlite3")
+    prepared = ResolutionService(store, settings, session).prepare(question.strip(), support_context)
+    try:
+        if prepared.get("_resolution_direct"):
+            from src.security import rate_limit
+            rate_limit(store, session, settings.requests_per_minute)
+            result = {"answer": "", "sources": [], "route": "support_followup",
+                "needs_human_support": False, "query_id": None, "search_query": "",
+                "retrieval_required": False, "retrieval_performed": False}
+            result["query_id"] = Monitor(store, settings).trace(session, {"question": question, **result})
+            return _escalate(question, history, session, result, response_language, prepared)
+        # Only clear, general knowledge questions may use a saved answer. Active
+        # troubleshooting, action requests and human requests keep their normal routes.
+        from src.intent_rules import deterministic_intent
+        if (response_language == "en" and deterministic_intent(question) == "KNOWLEDGE"
+                and not prepared.get("force_knowledge") and not prepared.get("faq")
+                and not prepared.get("steps_tried")
+                and len(prepared.get("customer_reported", [])) <= 1):
+            from src.customer_faq import CustomerFAQs
+            from src.faq_search import clear_match
+            article = clear_match([a for a in CustomerFAQs(store, settings).articles() if a["kind"] == "published"], question, settings=settings)
+            if article:
+                from src.security import rate_limit
+                rate_limit(store, session, settings.requests_per_minute)
+                import json
+                metadata = json.loads(store.rows("SELECT metadata FROM chunks WHERE id=?", (article["chunk_id"],))[0]["metadata"])
+                citations = [{"document_id": metadata["document_id"], "chunk_id": article["chunk_id"],
+                              "page_number": metadata.get("page_number")}]
+                label = metadata.get("source", metadata["document_id"])
+                if metadata.get("page_number") is not None:
+                    label += f", page {metadata['page_number']}"
+                result = {"answer": article["answer"], "answerable": True,
+                    "sources": citations if call is _ask_structured else [label], "citations": citations,
+                    "route": "faq", "needs_human_support": False, "reason": None, "search_query": question,
+                    "retrieval_required": True, "retrieval_performed": True, "faq": article,
+                    "verification": {"passed": article["kind"] == "published", "reason": "saved_approved_faq" if article["kind"] == "published" else "general_help"}}
+                result["query_id"] = Monitor(store, settings).trace(session, {"question": question, **result})
+                # Remember the article shown without treating it as already failed.
+                prepared["_faq_shown"] = article
+                return _escalate(question, history, session, result, response_language, prepared)
+        return call(question, history, session, response_language=response_language, support_context=prepared)
+    except PermissionError:
+        return _escalate(question, history, session, {"answer": message("resolution_rate_limited", response_language),
+            "sources": [], "answerable": False, "route": "rate_limited", "reason": "rate_limited",
+            "needs_human_support": False, "retrieval_performed": False, "query_id": None}, response_language, prepared)
+
+
+def ask_shopassist(question, chat_history, session="local", *, response_language="hinglish", support_context=None):
+    return _support_request(_ask_shopassist, question, chat_history, session, response_language, support_context)
+
+
+def ask_structured(question, chat_history=None, session="local", *, response_language="hinglish", support_context=None):
+    return _support_request(_ask_structured, question, chat_history, session, response_language, support_context)
+
+
+def reset_support_resolution(session):
+    from src.resolution import ResolutionService
+    settings = Settings.from_env()
+    ResolutionService(Store(settings.state_dir / "control.sqlite3"), settings, session).reset()
+
+
+def request_human_support(question, history=None, session="local"):
+    if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000:
+        raise ValueError("Describe the issue in 1–2000 characters")
+    result = _escalate(question, history, session, {"answer": "", "sources": [], "route": "human_support",
+        "needs_human_support": True, "reason": "user_requested"})
+    if not result.get("ticket"):
+        raise RuntimeError("Support request could not be recorded")
+    return result["ticket"]

@@ -5,6 +5,7 @@ import math
 from uuid import uuid4
 
 from src.schemas import Answer, Citation, FAQBatch, FAQCandidate
+from src.faq_catalog import published_faqs
 from src.security import suspicious
 from src.store import encode, now
 from src.verification import normalize, numbers
@@ -180,8 +181,7 @@ class FAQService:
             self.store.audit(principal.name, "faq." + target.lower(), faq_id, conn=conn)
 
     def published(self):
-        return [json.loads(r["body"]) for r in self.store.rows("""SELECT f.body FROM faqs f JOIN documents d
-            ON d.id=f.document_id WHERE f.status='PUBLISHED' AND d.deleted=0 AND d.active_version=f.version_id""")]
+        return [row["body"] for row in published_faqs(self.store)]
 
     def correction_from_feedback(self, feedback_id, chunk_id, candidate, principal):
         principal.require("review")

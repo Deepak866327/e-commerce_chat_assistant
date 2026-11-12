@@ -1,0 +1,37 @@
+{
+  "scope": "Development conversation contracts; answers and policy correctness still require human review.",
+  "scenarios": [
+    {"name": "missing_cancel_option", "turns": [
+      {"question": "My cancellation option is missing", "expect": {"asked": ["dispatch_status"], "ticket": false}},
+      {"question": "No", "expect": {"facts": ["dispatch_status"], "asked": ["channel"], "ticket": false}},
+      {"question": "I am using the website", "expect": {"facts": ["dispatch_status", "channel", "blocker"], "search_contains": ["before dispatch", "missing", "website"]}}
+    ]},
+    {"name": "approved_refund_details", "turns": [
+      {"question": "My refund was approved 20 days ago and I already checked my bank", "expect": {"facts": ["refund_approval", "approval_date", "steps_attempted"], "never_ask": ["refund_approval", "approval_date", "steps_attempted"], "search_contains": ["20 days"]}},
+      {"question": "Please connect me to a human", "expect": {"ticket": true}}
+    ]},
+    {"name": "charged_without_confirmation", "turns": [
+      {"question": "My payment was deducted but I have no order confirmation", "expect": {"facts": ["charged_status", "order_confirmation"], "never_ask": ["charged_status", "order_confirmation"], "search_contains": ["payment deducted", "confirmation missing"]}},
+      {"question": "I already checked my email and order history", "expect": {"facts": ["steps_attempted"]}}
+    ]},
+    {"name": "tracking_context", "turns": [
+      {"question": "My tracking shows label created and has not updated", "expect": {"facts": ["tracking_update"], "search_contains": ["label created"]}},
+      {"question": "Still not working", "expect": {"facts": ["tracking_update"]}}
+    ]},
+    {"name": "damaged_return", "turns": [
+      {"question": "I want to return an item that arrived damaged", "expect": {"facts": ["item_problem"], "never_ask": ["item_problem"], "search_contains": ["damaged"]}},
+      {"question": "Problem solved", "expect": {"phase": "resolved", "ticket": false}}
+    ]},
+    {"name": "backend_execution", "turns": [
+      {"question": "Cancel my order for me", "expect": {"reason": "backend_action_required", "ticket": true, "model_calls": 0}}
+    ]},
+    {"name": "guide_without_execution", "turns": [
+      {"question": "How can I cancel my order?", "expect": {"ticket": false}},
+      {"question": "Please connect me to a human", "expect": {"ticket": true}}
+    ]},
+    {"name": "small_talk_budget", "turns": [
+      {"question": "Hi", "expect": {"attempts": 0, "ticket": false}},
+      {"question": "Thanks", "expect": {"attempts": 0, "ticket": false}}
+    ]}
+  ]
+}

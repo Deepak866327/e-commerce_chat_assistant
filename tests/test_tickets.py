@@ -125,14 +125,16 @@ class TicketTests(unittest.TestCase):
         self.assertIn(result["ticket"]["reference"], result["answer"])
         self.assertFalse(result["retrieval_performed"])
 
-    def test_unavailable_grounded_index_automatically_creates_ticket(self):
+    def test_unavailable_grounded_index_tries_followups_before_ticket(self):
         from src.rag_memory import ask_shopassist
         from src.vector_index import IndexUnavailable
         with patch("src.rag_memory.Settings.from_env", return_value=self.settings), \
              patch("src.rag_memory.runtime", side_effect=IndexUnavailable("unavailable")):
-            result = ask_shopassist("What is the return policy?", [], "owner")
-        self.assertEqual(result["sources"], [])
-        self.assertEqual(result["ticket"]["status"], "OPEN")
+            replies = [ask_shopassist(question, [], "owner") for question in
+                       ("What is the return policy?", "No", "No", "No")]
+        self.assertTrue(all("ticket" not in reply for reply in replies[:3]))
+        self.assertEqual(replies[-1]["ticket"]["status"], "OPEN")
+        self.assertEqual(replies[-1]["resolution"]["attempts"], 3)
 
     def test_ticket_failure_does_not_claim_a_successful_handoff(self):
         from src.rag_memory import ask_shopassist
@@ -143,7 +145,7 @@ class TicketTests(unittest.TestCase):
         self.assertNotIn("ticket", result)
         self.assertNotIn("SA-", result["answer"])
 
-    def test_account_action_and_legacy_failure_raise_tickets(self):
+    def test_account_action_and_legacy_failure_start_with_followups(self):
         from src.rag_memory import ask_shopassist
         legacy = ModuleType("src.legacy_rag")
         legacy.ask_shopassist = Mock(side_effect=RuntimeError("unavailable"))
@@ -152,14 +154,15 @@ class TicketTests(unittest.TestCase):
              patch.dict("sys.modules", {"src.legacy_rag": legacy}):
             result = ask_shopassist("Please check my order status", [], "owner")
         self.assertFalse(result["retrieval_performed"])
-        self.assertIn("ticket", result)
+        self.assertNotIn("ticket", result)
+        self.assertEqual(result["resolution"]["attempts"], 1)
         legacy.ask_shopassist.assert_not_called()
         with patch("src.rag_memory.Settings.from_env", return_value=replace(self.settings, pipeline="legacy")), \
              patch("src.rag_memory.classify_query", return_value="KNOWLEDGE"), \
              patch.dict("sys.modules", {"src.legacy_rag": legacy}):
             result = ask_shopassist("What is the return policy?", [], "owner")
-        self.assertEqual(result["reason"], "service_unavailable")
-        self.assertIn("ticket", result)
+        self.assertEqual(result["failure_reason"], "service_unavailable")
+        self.assertNotIn("ticket", result)
 
     def test_ticket_creation_rate_is_bounded_and_invalid_questions_rejected(self):
         for index in range(5):

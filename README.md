@@ -90,6 +90,12 @@ before activation; see [the platform runbook](docs/AI_PLATFORM_RUNBOOK.md).
 ```
 
 Open the local URL printed by Streamlit. The sidebar includes a button to clear the conversation.
+Choose **Chat language** independently of speech recognition: Hinglish, English,
+or Hindi. The preference applies to conversational replies, account guidance,
+ticket confirmations, abstentions and generated policy answers in both pipelines.
+Customer-reported issue details and attempted steps are kept in bounded session
+context separately from verified policy evidence. Account-action follow-ups can
+continue the same session-owned ticket; a new issue starts fresh context.
 
 ## Voice support
 
@@ -142,14 +148,31 @@ download the model. The model files are deployment artifacts, excluded from Git.
 
 ## Dataset preparation
 
-These optional scripts download the Bitext customer support dataset and produce filtered chat-format training, validation, and test JSONL files:
+These optional scripts download the Bitext customer support dataset and prepare
+filtered **review candidates**. Generic dataset answers are not approved company
+policies and may claim backend capabilities the chatbot does not have:
 
 ```powershell
 .\.venv\Scripts\python.exe src/download_datasets.py
 .\.venv\Scripts\python.exe src/prepare_datasets.py
 ```
 
-The downloaded and processed datasets are written under `data/training/` and excluded from Git. Review the upstream dataset's license and terms before using or redistributing it. Running these scripts does not train the custom model.
+The default preparation command writes `review_candidates.jsonl`, never training
+splits. Review/edit each example, set `reviewed` to `true`, identify the `reviewer`,
+and assign a shared `group_id` to related examples/paraphrases. Supply approved
+`policy_context` for company facts or contact details. Obvious backend-action
+claims must be rewritten. The flags are heuristic review aids, not factual validation.
+Save reviewed entries separately, then export chat-format splits:
+
+```powershell
+.\.venv\Scripts\python.exe src/prepare_datasets.py --reviewed-file data/training/reviewed_examples.jsonl
+```
+
+Export requires at least 20 reviewed examples in three leakage groups; groups
+never cross train/validation/test splits. Evaluation data stays separate.
+The downloaded and processed datasets are written under `data/training/` and
+excluded from Git. Review the upstream dataset's license and terms before using
+or redistributing it. These scripts do not train or replace the custom model.
 
 ## Project layout
 
@@ -191,15 +214,87 @@ staff workspace in the existing Streamlit app. Support staff can respond to tick
 reviewers can review FAQ drafts; administrators can queue generation and publish
 approved FAQs. SQLite holds workflow state; Chroma still holds vectors.
 
-Unresolved support answers and explicit human requests create a ticket. Customers
+The bot first asks a relevant follow-up or gives evidence-based guidance and
+checks whether it helped. It tracks each issue across turns, avoids repeating
+questions/steps, and escalates after three unsuccessful support cycles. Set
+`SHOPASSIST_SUPPORT_MAX_ATTEMPTS=2` for a two-attempt budget. These are customer
+support attempts, not the model's internal generation retries. A reply to a
+requested detail is used before declaring that attempt unsuccessful.
+
+Explicit human requests create a ticket immediately. Greetings and thanks do not
+consume the budget; a new issue or **Clear conversation** resets it. Resolution
+requires customer confirmation. See [the support flow](docs/RESOLUTION_FLOW.md).
+No CRM is assumed. The bot remembers customer-reported dispatch, refund approval,
+payment/confirmation state and website/app details, and uses them to retrieve
+situation-specific guidance. Missing cancellation options and deducted payments
+get targeted clarification instead of repeated generic policy answers. Non-policy
+checks are offered once when useful; store-specific procedures still require approved
+evidence. Explicit requests to actually perform backend work (for example, “cancel
+my order for me”) are handed off without spending the retry budget. Ordinary “how
+can I cancel?” questions retain the guidance flow. A narrow completion-claim guard
+rejects explicit claims that the bot cancelled an order, processed a refund or checked
+an account; it is not a proof against every possible unsupported paraphrase.
+
+Agent tickets include a brief distinguishing reported facts, steps tried, guidance
+shown, blocker and handoff reason. After handoff, new details about the same known
+issue update the owned ticket. Staff can inspect missing-evidence questions under
+**Knowledge gaps to review**. See [the content guide](docs/SUPPORT_CONTENT_GUIDE.md)
+for writing actual procedures and running the real-model conversation checks.
+
+Customers
 can also use **Talk to a human** and check **Your support tickets** in the sidebar.
 Replies are available in the current browser session; click **Refresh ticket** to
 check for a staff response. Optional contact details require a configured encryption
 key. Ticket creation queues the request; it does not promise an immediate human reply.
 
-FAQ suggestions appear after a human reviews and publishes the generated drafts.
-Clicking a question sends it through the normal chat pipeline. Generated drafts,
-rejected FAQs and evaluation data never appear as customer suggestions. See the
+The customer **Help center · Frequently asked questions** panel offers search,
+topic filters and clickable questions. Answers stay hidden until a question is
+selected; the question and saved answer then appear as user/assistant chat messages.
+Feedback buttons appear with the chat answer. Browsing, searching and selecting FAQs
+do not call a generation model, create tickets or consume support attempts. **I still need help**
+saves feedback and sends the FAQ ID and revision into the support flow. The server
+loads the corresponding answer itself, asks a relevant detail first, and remembers
+the unsuccessful article through later replies and any agent handoff. Answers are
+shown in their reviewed language; the chat language selector controls chat replies.
+
+**This helped** records article feedback without submitting a chat turn or marking
+an unrelated active issue resolved. Votes are retained per session and article
+revision, so repeated clicks update a vote rather than inflate the count. Reviewers
+and admins can see **FAQ helpfulness** in Staff workspace, including confirmed chat
+resolutions, escalated issues and detected repeated guidance. These are retained
+feedback/support outcomes, not proof that a backend action was completed.
+
+FAQ search combines keyword matching with the configured local embedding model.
+If its dependencies or cached weights are missing, keyword search still works.
+No Ollama call is needed to read saved articles. FAQ vectors are cached by article
+revision; edited or withdrawn content is excluded by the publication gate before
+search. Restart after provisioning missing embedding weights.
+
+In English chat, an unambiguous exact approved FAQ question can return the saved
+answer with its source citation without a generation call. Active troubleshooting,
+human requests and account actions retain their normal routes. Other chat languages
+use the usual answer pipeline so the requested language is preserved. Semantic
+auto-answers are available behind `SHOPASSIST_FAQ_SEMANTIC_ANSWERS=true`, but stay off
+by default until evaluated on your paraphrases and difficult negative examples.
+The similarity and runner-up margin settings are retrieval heuristics, not calibrated
+confidence probabilities. Low-confidence, ambiguous and personally qualified queries
+use RAG instead. Only current published policy FAQs qualify for automatic answers;
+built-in general help does not substitute for a store-specific policy.
+
+Fresh deployments show six built-in general-help FAQs (orders, delivery, returns,
+refunds, payments and support), with search and topic filters immediately available.
+These explain practical checks without promising store-specific eligibility or
+timelines. The published store catalog replaces this starter catalog once available.
+If the store catalog cannot load, general help remains available with a notice.
+The legacy `data/faqs/faqs.json` file is not automatically published: its policy
+claims still need validation and review against current source documents.
+
+To populate the panel, open **Staff workspace**, generate drafts from current policy
+chunks, review and edit the answers and categories, select **Approve reviewed FAQ**,
+then have an admin select **Publish approved FAQ**. Only reviewed, verified FAQs
+whose source version is still active appear. Edits, withdrawal or source changes
+remove the article on the next interaction without rebuilding the index. Generated drafts,
+rejected FAQs and evaluation data never appear in the help center. See the
 [runbook](docs/AI_PLATFORM_RUNBOOK.md) for staff credentials and worker setup.
 
 - [Audit](docs/AI_UPGRADE_AUDIT.md)
@@ -211,6 +306,12 @@ Run offline checks with `python -m unittest discover -v` and
 `python -m compileall -q app.py src scripts tests`. Optional extraction/OCR and
 evaluation dependencies are in `requirements-ocr.txt` and `requirements-eval.txt`.
 `python scripts/offline_audit.py` generates extraction and chunk-structure reports.
+`python scripts/evaluate_support_routes.py` checks deterministic conversation
+routes and explicitly reports skipped model cases. Add `--model-backed` with
+local Ollama available to test complaint/policy/follow-up classification. This
+development routing check does not measure factual accuracy or authorize release.
+See [the incremental support changes](docs/SUPPORT_IMPROVEMENTS.md) for scope,
+validation and remaining model-backed work.
 
 Existing deployments can explicitly set `SHOPASSIST_PIPELINE=legacy` while staging
 the upgrade. This preserves the previous customer answer pipeline and collection;

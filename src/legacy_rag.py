@@ -1,5 +1,7 @@
 # Frozen pre-upgrade pipeline for controlled baseline evaluation only.
 from pathlib import Path
+from src.language import language_instruction, message
+from src.policy_answer import generate_policy_answer
 
 from langchain_ollama import ChatOllama
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -112,7 +114,7 @@ def _initialize():
 
     STRICT INSTRUCTIONS:
 
-    1. Answer in natural Hinglish (Hindi + English).
+    1. Follow the requested response language.
     2. For company policy facts, use ONLY the retrieved
        policy context.
     3. Do not add unrelated policy information.
@@ -135,8 +137,18 @@ def _initialize():
     13. Distinguish refunds, returns, exchanges and order cancellations.
     14. For refund questions, use refund evidence. Cancellation rules alone
         do not establish refund eligibility, procedure or timing.
-    15. If the context does not answer the question, say verified policy
+    15. Use customer-reported details to address the original issue, including short
+        follow-up replies. Do not repeat guidance already tried. Do not ask questions
+        or claim a support ticket was created; the support flow manages the next step.
+    16. If the context does not answer the question, say verified policy
         information is unavailable instead of inferring an answer.
+    17. An faq record in history is an article previously shown to the customer,
+        not current policy evidence. If its outcome is not_helpful, address the
+        blocker using retrieved evidence instead of repeating that article.
+    18. Lead with the next step relevant to the reported blocker, not a generic
+        greeting or the whole policy. Mention missing system access only when
+        the task requires it. Never invent app menus, buttons or procedures.
+        A related eligibility rule does not explain how to fix a missing button.
 
     EXAMPLE:
 
@@ -153,6 +165,7 @@ def _initialize():
         (
             "system",
             SYSTEM_RULES
+            + "\nRESPONSE LANGUAGE: {response_language}"
             + "\n\nVERIFIED POLICY CONTEXT:\n{context}"
         ),
         MessagesPlaceholder(variable_name="chat_history"),
@@ -221,7 +234,8 @@ def _initialize():
 
     return db, scope_chain, rewrite_chain, answer_chain, OUT_OF_SCOPE_REPLY
 
-def ask_shopassist(question, chat_history, *, intent_checked=False):
+def ask_shopassist(question, chat_history, *, intent_checked=False, response_language="hinglish", search_question=None):
+    language_instruction(response_language)
     db, scope_chain, rewrite_chain, answer_chain, OUT_OF_SCOPE_REPLY = _initialize()
     chat_history = chat_history[-MAX_HISTORY_MESSAGES:]
 
@@ -238,7 +252,7 @@ def ask_shopassist(question, chat_history, *, intent_checked=False):
 
     if scope_result != "IN_SCOPE":
         return {
-            "answer": OUT_OF_SCOPE_REPLY,
+            "answer": message("out_of_scope", response_language),
             "search_query": question,
             "sources": []
         }
@@ -261,6 +275,9 @@ def ask_shopassist(question, chat_history, *, intent_checked=False):
         rewritten_question = question
 
     # B. RETRIEVE RELEVANT PDF CHUNKS
+
+    if intent_checked and search_question:
+        rewritten_question = search_question
 
     docs = db.similarity_search(
         rewritten_question,
@@ -293,13 +310,21 @@ def ask_shopassist(question, chat_history, *, intent_checked=False):
 
     # D. CALL FINE-TUNED QWEN
 
-    response = answer_chain.invoke({
+    payload = {
         "question": question,
         "context": context,
+        "response_language": language_instruction(response_language),
         "chat_history": chat_history
-    })
-
-    answer = response.content
+    }
+    if intent_checked:
+        answer = generate_policy_answer(answer_chain, payload, [doc.page_content for doc in docs])
+        if answer is None:
+            return {"answer": message("abstention", response_language),
+                    "sources": [], "search_query": rewritten_question,
+                    "answerable": False, "needs_human_support": True, "reason": "unsupported_policy_numbers"}
+    else:
+        # Keep the controlled pre-upgrade baseline unmodified.
+        answer = answer_chain.invoke(payload).content
 
     return {
         "answer": answer,

@@ -140,11 +140,19 @@ grounded index remains gated. If source matching fails, review/reindex separatel
 
 ### Human support tickets
 
-Explicit human requests, requests requiring account access, model/index failures
-and unsupported support answers create session-owned tickets. Greetings,
-clarification, unrelated questions and blocked instructions do not. Repeated
-requests reuse the open ticket. Creating tickets does not send email or invoke an
-external help desk. A human team must monitor the queue.
+Explicit human requests create session-owned tickets immediately. Other unresolved
+support requests first receive targeted follow-up questions or supported guidance.
+The default budget is three customer-facing support cycles; set
+`SHOPASSIST_SUPPORT_MAX_ATTEMPTS=2` for two. Internal model retries are separate.
+The bot uses detail replies before deciding failure, checks the outcome, and
+queues human support once the issue remains unresolved at the budget. Greetings,
+thanks, unrelated questions and blocked instructions do not consume attempts.
+Repeated handoffs reuse the owned open ticket. Each issue has its own dedupe key
+and summary, so a generic reply such as "No" does not merge unrelated issues.
+See [resolution flow and migration](RESOLUTION_FLOW.md).
+
+Creating tickets does not send email or invoke an external help desk. A human
+team must monitor the queue. No CRM or transaction capability is added.
 
 Customers can use **Talk to a human**, see status and replies under **Your support
 tickets**, and add details. These controls use the current Streamlit session;

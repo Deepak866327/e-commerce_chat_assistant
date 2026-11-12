@@ -1,0 +1,30 @@
+{
+  "purpose": "Development routing regressions. These synthetic cases do not establish factual accuracy or production acceptance.",
+  "cases": [
+    {"id":"greeting-en","question":"Hello!","expected":"CONVERSATION"},
+    {"id":"greeting-hi","question":"नमस्ते","expected":"CONVERSATION"},
+    {"id":"handoff-en","question":"Talk to an agent!","expected":"HUMAN_SUPPORT"},
+    {"id":"handoff-hinglish","question":"mujhe customer care se baat karni hai","expected":"HUMAN_SUPPORT"},
+    {"id":"handoff-hi","question":"मुझे एजेंट से बात करनी है","expected":"HUMAN_SUPPORT"},
+    {"id":"declined-en","question":"I do not want to talk to a human","expected":"CLARIFICATION"},
+    {"id":"declined-contraction","question":"I don't want to talk to a human","expected":"CLARIFICATION"},
+    {"id":"declined-hi","question":"मुझे एजेंट से बात नहीं करनी","expected":"CLARIFICATION"},
+    {"id":"help","question":"help me","expected":"CLARIFICATION"},
+    {"id":"thanks","question":"thank you","expected":"CONVERSATION"},
+    {"id":"mixed-greeting-policy","question":"Hi, what is your refund policy?","expected":"KNOWLEDGE"},
+    {"id":"declined-handoff-policy","question":"I do not want an agent; explain your return policy","expected":"KNOWLEDGE"},
+    {"id":"refund-complaint-action","question":"My refund is 20 days overdue. Please expedite it.","expected":"ACCOUNT_ACTION"},
+    {"id":"refund-general","question":"How long do refunds take?","expected":"KNOWLEDGE"},
+    {"id":"cancel-action","question":"Cancel my order for me","expected":"ACCOUNT_ACTION"},
+    {"id":"cancel-procedure","question":"How do I cancel my order?","expected":"KNOWLEDGE"},
+    {"id":"cancel-procedure-can","question":"How can I cancel my order?","expected":"KNOWLEDGE"},
+    {"id":"payment-problem","question":"My payment failed","expected":"ACCOUNT_ACTION"},
+    {"id":"still-unresolved","question":"Thanks, but my refund is still missing. Check it please.","expected":"ACCOUNT_ACTION"},
+    {"id":"human-refund","question":"Please connect me to a human about my refund","expected":"HUMAN_SUPPORT"},
+    {"id":"policy-followup","question":"And express?","history":[{"role":"user","content":"What is standard shipping time?"}],"expected":"KNOWLEDGE"},
+    {"id":"account-followup","question":"Yes, it was approved 20 days ago","history":[{"role":"user","content":"My refund is missing"},{"role":"assistant","content":"Have you received confirmation that the refund was approved?"}],"expected":"ACCOUNT_ACTION"},
+    {"id":"hinglish-policy","question":"Refund ki policy kya hai?","expected":"KNOWLEDGE"},
+    {"id":"hindi-policy","question":"क्या भेजे जाने के बाद ऑर्डर रद्द हो सकता है?","expected":"KNOWLEDGE"},
+    {"id":"unrelated","question":"Write a Python script to sort numbers","expected":"OUT_OF_SCOPE"}
+  ]
+}
