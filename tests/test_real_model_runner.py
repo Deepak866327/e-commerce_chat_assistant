@@ -6,11 +6,18 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.evaluate_real_models import inspect_result, main
+from scripts.evaluate_real_models import inspect_result, inspect_support_turn, main
 from src.ollama_client import ModelUnavailable
 
 
 class RealModelRunnerTests(unittest.TestCase):
+    def test_conversation_contracts_detect_lost_context_and_reasked_known_facts(self):
+        failures = inspect_support_turn({"facts": ["dispatch_status"], "never_ask": ["channel"],
+            "search_contains": ["missing cancellation"], "ticket": False, "model_calls": 0},
+            {"support_context": {"reported_facts": {}}, "resolution": {"asked": ["channel"]}, "ticket": {"reference": "test"}}, 1)
+        self.assertEqual(len(failures), 5)
+        self.assertIn("missing_fact:dispatch_status", failures)
+
     def test_policy_case_cannot_pass_without_verified_citations(self):
         case = {"answerable": True}
         result = {"answerable": True, "verification": {"passed": False}, "sources": []}

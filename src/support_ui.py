@@ -111,6 +111,19 @@ def render_staff_tickets(tickets, principal):
     labels = {r["reference"]: f"{r['reference']} · {r['status']} · {json.loads(r['payload'])['question'][:80]}" for r in rows}
     reference = st.selectbox("Support ticket", list(labels), format_func=labels.get)
     ticket = tickets.detail(reference, principal)
+    brief = ticket["payload"].get("agent_brief")
+    if brief:
+        st.subheader("Agent handoff brief")
+        st.write("Customer goal:", brief.get("customer_goal", ""))
+        st.caption("Customer-reported details · No CRM/order/payment verification has been performed")
+        for name, value in brief.get("reported_facts", {}).items():
+            st.write(name.replace("_", " ").capitalize() + ":", value)
+        st.write("Remaining blocker:", brief.get("unresolved_blocker", ""))
+        st.write("Reason for handoff:", str(brief.get("handoff_reason", "")).replace("_", " "))
+        st.write("Latest customer update:", brief.get("latest_customer_update", ""))
+        with st.expander("Steps already discussed"):
+            st.write("Customer says they tried:", brief.get("customer_steps_tried", []))
+            st.write("Bot guidance shown:", brief.get("guidance_shown", []))
     st.write(ticket["payload"]["question"])
     if ticket["payload"]["last_answer"]:
         st.caption("Last automated answer")
@@ -151,6 +164,14 @@ def render_staff_faqs(settings, store, principal):
     from src.ollama_client import OllamaClient
     from src.verification import GroundingVerifier
     st.subheader("FAQ generation and review")
+    from src.knowledge_quality import knowledge_gaps
+    with st.expander("Knowledge gaps to review"):
+        gaps = knowledge_gaps(store, principal)
+        if gaps:
+            st.dataframe(gaps, hide_index=True)
+            st.caption("Add the missing procedure to an approved source document, ingest it, then review and publish its FAQ. Customer messages are not policy evidence.")
+        else:
+            st.caption("Missing-evidence questions will appear here for policy review.")
     from src.customer_faq import CustomerFAQs
     with st.expander("FAQ helpfulness"):
         stats = CustomerFAQs(store, settings).report(principal)

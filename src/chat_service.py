@@ -14,9 +14,10 @@ from src.language import message, language_instruction
 from src.query_routing import classify_query, response_without_retrieval
 from src.security import rate_limit, redact, suspicious
 from src.verification import numbers, validate_citations
+from src.support_diagnostics import claims_backend_action
 
 logger = logging.getLogger(__name__)
-PROMPT_VERSION = "shopassist-grounded-v4"
+PROMPT_VERSION = "shopassist-grounded-v5"
 MAX_HISTORY_MESSAGES = 8
 ABSTENTION = ("Mere paas iski verified policy information nahi hai. "
               "Aap human support team se madad le sakte hain.")
@@ -42,6 +43,13 @@ questions or say a ticket was created: the support flow adds one next question o
 If the latest message is a short answer, use reported context to address the original issue.
 The faq field records an article previously shown to the customer, not current policy evidence.
 If its outcome is not_helpful, do not repeat the article; address the reported blocker using supplied evidence.
+Lead with the relevant next step for the stated blocker. Briefly acknowledge an active
+problem without a generic greeting. Do not explain the whole policy when only one step
+is relevant. Mention lack of system access only when the requested task requires it;
+do not prepend an access disclaimer to ordinary guidance. Do not invent website menus,
+buttons, contact channels or app screens. If a specific procedure is absent from the
+evidence, do not substitute a related eligibility rule as though it solved the blocker.
+Customer-reported dispatch, approval or payment status is not independently verified.
 """
 
 
@@ -78,12 +86,16 @@ def history_messages(history, support_context=None):
                     context["assistant_attempts"].pop(0)
                 elif context["steps_tried"]:
                     context["steps_tried"].pop(0)
-                elif context["reported_facts"]:
-                    context["reported_facts"].popitem()
                 elif len(context["customer_reported"]) > 1:
                     context["customer_reported"].pop(1)
+                elif any(len(value) > 100 for value in context["reported_facts"].values()):
+                    context["reported_facts"] = {key: value[:100] for key, value in context["reported_facts"].items()}
                 elif context.get("faq"):
                     context["faq"] = None
+                elif len(context["customer_reported"][0]) > 100:
+                    context["customer_reported"][0] = context["customer_reported"][0][:100]
+                elif context["reported_facts"]:
+                    context["reported_facts"].popitem()
                 else:
                     context["customer_reported"][0] = context["customer_reported"][0][:100]
             result.insert(0, {"role": "user", "content": json.dumps(
@@ -194,6 +206,10 @@ class ChatService:
                                                  str(verification.get("reason", "unsupported"))[:300] +
                                                  ". Recheck the supplied official evidence. Correct unsupported claims or abstain."})
                             candidate = self.client.structured(self.settings.answer_model, messages, Answer, retries=1)
+                            if claims_backend_action(candidate.answer):
+                                verification = {"passed": False, "reason": "backend_claim_rejected", "evidence_coverage": 0}
+                                answer = abstain("backend_claim_rejected")
+                                continue
                             if not validate_citations(candidate, chunks):
                                 verification = {"passed": False, "reason": "invalid_citations", "evidence_coverage": 0}
                                 continue

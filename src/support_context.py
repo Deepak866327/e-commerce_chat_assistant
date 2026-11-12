@@ -28,7 +28,7 @@ def clean_context(context):
     facts = {key: redact(value)[:300] for key, value in facts.items()
              if key in {"dispatch_status", "refund_approval", "approval_date", "payment_error", "charged_status",
                         "tracking_update", "expected_delivery", "item_problem", "delivery_date", "product_problem",
-                        "purchase_date", "steps_attempted", "blocker", "issue_details"}
+                        "purchase_date", "steps_attempted", "blocker", "issue_details", "channel", "order_confirmation"}
              and isinstance(value, str) and not suspicious(value)} if isinstance(facts, dict) else {}
     faq = context.get("faq")
     if isinstance(faq, dict):

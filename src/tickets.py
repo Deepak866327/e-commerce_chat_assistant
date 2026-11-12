@@ -73,6 +73,7 @@ class TicketService:
         if context["ticket_reference"] and result.get("route") in {"account_action", "human_support", "handoff"}:
             previous = self._owned(context["ticket_reference"], session)
             if previous["status"] not in TERMINAL:
+                self.refresh_brief(previous, question, result)
                 self.reply(previous["reference"], question, session=session)
                 return self.summary(previous)
         issue_id = result.get("resolution", {}).get("issue_id")
@@ -88,6 +89,8 @@ class TicketService:
             "history": history[-8:], "sources": result.get("citations", result.get("sources", [])),
             "route": result.get("route"), "verification": result.get("verification"),
             "customer_reported_context": context, "resolution_summary": result.get("resolution_summary", {})})
+        from src.agent_brief import agent_brief
+        payload["agent_brief"] = agent_brief(question, {**result, "reason": result.get("reason") or reason})
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute("SELECT * FROM tickets WHERE session_hash=? AND dedupe_key=? AND closed_at IS NULL", (session_hash, dedupe)).fetchone()
@@ -107,6 +110,23 @@ class TicketService:
                 body.update(needs_human_support=True, ticket={"reference": reference, "status": "OPEN"})
                 conn.execute("UPDATE traces SET body=? WHERE id=?", (encode(body), query_id))
         return {"reference": reference, "status": "OPEN", "created_at": timestamp}
+
+    def refresh_brief(self, owned_ticket, question, result):
+        from src.agent_brief import agent_brief
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT payload FROM tickets WHERE id=? AND session_hash=? AND closed_at IS NULL",
+                               (owned_ticket["id"], owned_ticket["session_hash"])).fetchone()
+            if not row:
+                return
+            payload = json.loads(row["payload"])
+            if result.get("support_context"):
+                payload["agent_brief"] = agent_brief(question, result)
+                payload["customer_reported_context"] = result["support_context"]
+                payload["resolution_summary"] = result.get("resolution_summary", payload.get("resolution_summary", {}))
+            else:
+                payload.setdefault("agent_brief", {})["latest_customer_update"] = question[:500]
+            conn.execute("UPDATE tickets SET payload=?,updated_at=? WHERE id=? AND session_hash=?",
+                         (encode(redact_value(payload)), now(), owned_ticket["id"], owned_ticket["session_hash"]))
 
     def contact(self, reference, value, session):
         ticket = self._owned(reference, session)
@@ -155,6 +175,11 @@ class TicketService:
             conn.execute("INSERT INTO ticket_messages(ticket_id,author,body,created_at) VALUES(?,?,?,?)",
                          (ticket["id"], author, redact(message.strip()), timestamp))
             conn.execute("UPDATE tickets SET updated_at=? WHERE id=?", (timestamp, ticket["id"]))
+            if principal is None:
+                payload_row = conn.execute("SELECT payload FROM tickets WHERE id=?", (ticket["id"],)).fetchone()
+                payload = json.loads(payload_row["payload"])
+                payload.setdefault("agent_brief", {})["latest_customer_update"] = redact(message.strip())[:500]
+                conn.execute("UPDATE tickets SET payload=? WHERE id=?", (encode(payload), ticket["id"]))
             conn.execute("INSERT INTO ticket_events(ticket_id,actor,action,detail,created_at) VALUES(?,?,?,?,?)",
                          (ticket["id"], principal.name if principal else "customer", "REPLIED", encode({"author": author}), timestamp))
             self.store.audit(principal.name if principal else "customer", "ticket.reply", reference, conn=conn)

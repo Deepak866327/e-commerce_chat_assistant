@@ -145,6 +145,10 @@ def _initialize():
     17. An faq record in history is an article previously shown to the customer,
         not current policy evidence. If its outcome is not_helpful, address the
         blocker using retrieved evidence instead of repeating that article.
+    18. Lead with the next step relevant to the reported blocker, not a generic
+        greeting or the whole policy. Mention missing system access only when
+        the task requires it. Never invent app menus, buttons or procedures.
+        A related eligibility rule does not explain how to fix a missing button.
 
     EXAMPLE:
 

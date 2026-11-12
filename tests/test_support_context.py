@@ -56,6 +56,16 @@ class SupportContextTests(unittest.TestCase):
         encoded = json.dumps(json.loads(history[0]["content"])["customer_reported_context_not_verified"], ensure_ascii=False)
         self.assertLessEqual(len(encoded.encode("utf-8")), 1500)
 
+    def test_bounded_model_memory_keeps_known_status_before_redundant_old_reports(self):
+        context = clean_context({"issue_type": "cancellation", "customer_reported": ["I need to cancel my order"] + ["Old detail " * 30] * 5,
+                                 "reported_facts": {"dispatch_status": "not dispatched; customer said: " + "detail " * 40,
+                                                    "channel": "website; customer said: " + "detail " * 40,
+                                                    "blocker": "cancellation option missing"}})
+        memory = json.loads(history_messages([], context)[0]["content"])["customer_reported_context_not_verified"]
+        self.assertTrue(memory["reported_facts"]["dispatch_status"].startswith("not dispatched"))
+        self.assertTrue(memory["reported_facts"]["channel"].startswith("website"))
+        self.assertEqual(memory["reported_facts"]["blocker"], "cancellation option missing")
+
     def test_followup_reuses_owned_ticket_and_preserves_new_details(self):
         from src.rag_memory import _escalate
         state = remember_customer({}, "My refund is overdue")

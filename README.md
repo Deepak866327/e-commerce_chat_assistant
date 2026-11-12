@@ -224,6 +224,23 @@ requested detail is used before declaring that attempt unsuccessful.
 Explicit human requests create a ticket immediately. Greetings and thanks do not
 consume the budget; a new issue or **Clear conversation** resets it. Resolution
 requires customer confirmation. See [the support flow](docs/RESOLUTION_FLOW.md).
+No CRM is assumed. The bot remembers customer-reported dispatch, refund approval,
+payment/confirmation state and website/app details, and uses them to retrieve
+situation-specific guidance. Missing cancellation options and deducted payments
+get targeted clarification instead of repeated generic policy answers. Non-policy
+checks are offered once when useful; store-specific procedures still require approved
+evidence. Explicit requests to actually perform backend work (for example, “cancel
+my order for me”) are handed off without spending the retry budget. Ordinary “how
+can I cancel?” questions retain the guidance flow. A narrow completion-claim guard
+rejects explicit claims that the bot cancelled an order, processed a refund or checked
+an account; it is not a proof against every possible unsupported paraphrase.
+
+Agent tickets include a brief distinguishing reported facts, steps tried, guidance
+shown, blocker and handoff reason. After handoff, new details about the same known
+issue update the owned ticket. Staff can inspect missing-evidence questions under
+**Knowledge gaps to review**. See [the content guide](docs/SUPPORT_CONTENT_GUIDE.md)
+for writing actual procedures and running the real-model conversation checks.
+
 Customers
 can also use **Talk to a human** and check **Your support tickets** in the sidebar.
 Replies are available in the current browser session; click **Refresh ticket** to

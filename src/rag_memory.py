@@ -54,7 +54,8 @@ def _escalate(question, history, session, result, response_language="hinglish", 
             result["ticket"] = TicketService(store, settings).open(
                 ticket_question, result, history_messages(history), session, result.get("reason") or "resolution_attempts_exhausted")
             flow.attach_ticket(result, version)
-            result["answer"] = message("support_queued" if result.get("reason") in {"explicit_handoff", "existing_handoff"} else
+            result["answer"] = message("resolution_backend_handoff" if result.get("reason") == "backend_action_required" else
+                                       "support_queued" if result.get("reason") in {"explicit_handoff", "existing_handoff"} else
                                        "resolution_handoff", response_language,
                                        reference=result["ticket"]["reference"])
         except Exception as exc:

@@ -18,6 +18,7 @@ from src.intent_rules import explicit_handoff
 from src.security import redact, redact_value, suspicious
 from src.store import encode, now
 from src.support_context import clean_context, remember_customer
+from src.support_diagnostics import reported_details, next_slots, diagnostic_question, situation_query, manual_action_requested, claims_backend_action, general_check
 
 PLANS = {
     "cancellation": ["dispatch_status", "blocker", "steps_attempted"],
@@ -78,7 +79,7 @@ class ResolutionService:
     @staticmethod
     def fresh(context):
         return {"issue_id": "ISSUE_" + uuid4().hex, "context": context, "attempts": 0, "asked": [], "guidance": [],
-                "failures": [], "phase": "new", "pending_slot": None, "handoff_declined": False}
+                "failures": [], "general_checks": [], "phase": "new", "pending_slot": None, "handoff_declined": False}
 
     def prepare(self, question, supplied=None):
         normalized = " ".join(question.casefold().replace("’", "'").split()).rstrip(".!?।？！")
@@ -91,6 +92,7 @@ class ResolutionService:
             state = json.loads(row["body"]) if row else self.fresh(clean_context({}))
             previous = state["context"]
             context = remember_customer(previous, question)
+            context["reported_facts"].update(reported_details(question, context["issue_type"]))
             if context["steps_tried"]:
                 context["reported_facts"]["steps_attempted"] = context["steps_tried"][-1]
             # Report-memory resets signal an explicit new issue, even with the same topic.
@@ -134,22 +136,6 @@ class ResolutionService:
                 report = redact(question)[:300]
                 if report not in context["customer_reported"]:
                     context["customer_reported"] = (context["customer_reported"][:1] + context["customer_reported"][-4:] + [report])[-6:]
-            if "?" not in question and not re.search(r"\b(?:if|what if|suppose)\b", normalized):
-                if re.search(r"(?:not|hasn't) (?:yet )?(?:been )?(?:dispatched|shipped)", normalized):
-                    context["reported_facts"]["dispatch_status"] = "not dispatched; customer said: " + redact(question)[:250]
-                elif re.search(r"(?:has been|already) (?:dispatched|shipped)", normalized):
-                    context["reported_facts"]["dispatch_status"] = "dispatched; customer said: " + redact(question)[:250]
-                if re.search(r"refund.*(?:not|hasn't been|isn't) approved", normalized):
-                    context["reported_facts"]["refund_approval"] = "not approved; customer said: " + redact(question)[:250]
-                elif re.search(r"refund.*(?:was|is|has been) approved", normalized):
-                    context["reported_facts"]["refund_approval"] = "approved; customer said: " + redact(question)[:250]
-                    if re.search(r"\d+\s*(?:days|weeks)|\d{4}-\d{2}-\d{2}", normalized):
-                        context["reported_facts"]["approval_date"] = redact(question)[:300]
-                if context["issue_type"] == "payment":
-                    if re.search(r"error|declined|insufficient funds", normalized):
-                        context["reported_facts"]["payment_error"] = redact(question)[:300]
-                    if re.search(r"debited|charged|paise kate|पैसे कट", normalized):
-                        context["reported_facts"]["charged_status"] = redact(question)[:300]
             if not conversation and not suspicious(question) and not human_mention:
                 slot = state["pending_slot"]
                 if state["phase"] == "awaiting_detail" and slot:
@@ -165,6 +151,15 @@ class ResolutionService:
                             value = "not approved; customer said: " + question
                         elif normalized in YES or re.search(r"approved|approval confirmation", normalized):
                             value = "approved; customer said: " + question
+                    elif slot in {"charged_status", "order_confirmation"}:
+                        if normalized in YES:
+                            value = ("charged" if slot == "charged_status" else "received") + "; customer said: " + question
+                        elif normalized in NO:
+                            value = ("not charged" if slot == "charged_status" else "not received") + "; customer said: " + question
+                    elif slot == "blocker" and len(normalized.split()) >= 3:
+                        value = question
+                    elif slot == "channel":
+                        value = context["reported_facts"].get("channel")
                     elif normalized not in NO and not NO_HELP.search(normalized):
                         value = question
                     if value:
@@ -195,19 +190,25 @@ class ResolutionService:
         query = SEARCH.get(context["issue_type"], "")
         if force_knowledge and not query:
             query = "approved customer support guidance for this reported issue: " + (context["customer_reported"][0] if context["customer_reported"] else question)
-        if context["reported_facts"].get("refund_approval", "").startswith("not approved"):
-            query = "refund request eligibility and initiation procedure"
-        dispatch = context["reported_facts"].get("dispatch_status", "")
-        if dispatch:
-            query += " before dispatch" if dispatch.startswith("not dispatched") else " after dispatch"
+        query = situation_query(context, query)
+        diagnostic_slot = diagnostic_question(context)
+        if context["reported_facts"] and not conversation and not re.search(r"\b(?:python|javascript|programming|capital of|politics|sports)\b", normalized):
+            force_knowledge = True
         requested = explicit_handoff(question) or bool(conversation and conversation.get("reason") == "explicit_handoff")
         return {**context, "_resolution_version": version, "_resolution_direct": "requested_handoff" if requested else consent or ("resolved" if explicit_resolution else
-                "exhausted" if threshold else "faq_followup" if faq_followup else None), "force_knowledge": force_knowledge,
+                "existing_handoff" if context["ticket_reference"] and context["issue_type"] and not conversation
+                and not suspicious(question) and not re.search(r"\b(?:python|javascript|programming|capital of|politics|sports)\b", normalized) else
+                "manual_action" if manual_action_requested(question, context["issue_type"]) else "exhausted" if threshold else
+                "diagnostic" if diagnostic_slot and diagnostic_slot not in state["asked"] else "faq_followup" if faq_followup else None),
+                "diagnostic_slot": diagnostic_slot, "_customer_message": redact(question)[:500], "force_knowledge": force_knowledge,
                 "search_question": "What is the " + query + "?" if query else ""}
 
     def finish(self, result, prepared, language):
         from src.tickets import requires_ticket
         result = dict(result)
+        if claims_backend_action(result.get("answer", "")):
+            result.update(answer="", sources=[], citations=[], needs_human_support=True, answerable=False,
+                          reason="backend_claim_rejected", verification={"passed": False, "reason": "backend_claim_rejected"})
         with self.store.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT * FROM support_sessions WHERE session_hash=?", (self.owner,)).fetchone()
@@ -228,7 +229,7 @@ class ResolutionService:
             elif reason == "handoff_declined" or direct == "declined_handoff":
                 state.update(handoff_declined=True, phase="awaiting_detail", pending_slot=None)
                 result = self.plain(result, message("declined_handoff", language), "clarification", "handoff_declined")
-            elif explicit or direct == "exhausted":
+            elif explicit or direct in {"exhausted", "manual_action", "existing_handoff"}:
                 handoff = True
             elif result.get("route") in NON_ATTEMPTS or reason in {"out_of_scope", "unsafe_request", "rate_limited"}:
                 result["needs_human_support"] = False
@@ -237,7 +238,7 @@ class ResolutionService:
             elif state["phase"] == "handed_off" and not requires_ticket(result):
                 pass
             else:
-                needs_help = requires_ticket(result) or direct == "faq_followup"
+                needs_help = requires_ticket(result) or direct in {"faq_followup", "diagnostic"}
                 fingerprint = sha256(" ".join(result.get("answer", "").casefold().split()).encode()).hexdigest()
                 repeated = fingerprint in [item["fingerprint"] for item in state["guidance"]]
                 faq = context.get("faq")
@@ -246,13 +247,16 @@ class ResolutionService:
                                                            " ".join(faq["answer"].casefold().split())).ratio() >= .8
                 result["repeated_guidance"] = repeated
                 if needs_help:
-                    result["failure_reason"] = reason or "unanswered"
-                    state["failures"] = (state.get("failures", []) + [result["failure_reason"]])[-3:]
+                    if direct not in {"faq_followup", "diagnostic"}:
+                        result["failure_reason"] = reason or "unanswered"
+                        state["failures"] = (state.get("failures", []) + [result["failure_reason"]])[-3:]
                 if (needs_help or repeated) and (state["attempts"] >= self.settings.support_max_attempts or state["phase"] == "handed_off"):
                     handoff = True
                 else:
                     if needs_help or repeated:
-                        slots = list(dict.fromkeys(PLANS.get(context["issue_type"], PLANS[None]) + ["blocker", "issue_details", "steps_attempted"]))
+                        slots = list(dict.fromkeys(next_slots(context, PLANS.get(context["issue_type"], PLANS[None])) + ["blocker", "issue_details", "steps_attempted"]))
+                        if prepared.get("diagnostic_slot"):
+                            slots = [prepared["diagnostic_slot"], *slots]
                         if not context["reported_facts"].get("refund_approval", "").startswith("approved"):
                             slots = [slot for slot in slots if slot != "approval_date"]
                         slot = next((slot for slot in slots if slot not in state["asked"] and slot not in context["reported_facts"]), None)
@@ -262,6 +266,13 @@ class ResolutionService:
                             state["asked"].append(slot)
                             state.update(phase="awaiting_detail", pending_slot=slot)
                             result = self.plain(result, message("followup_" + slot, language), "support_followup", "clarification_needed")
+                            check = general_check(context, state.get("general_checks", []))
+                            if check and direct not in {"diagnostic", "faq_followup"}:
+                                text = message(check, language)
+                                result["answer"] = text + "\n\n" + result["answer"]
+                                state["general_checks"] = state.get("general_checks", []) + [check]
+                                state["guidance"] = (state["guidance"] + [{"fingerprint": sha256(text.casefold().encode()).hexdigest(),
+                                    "answer": text, "sources": [], "kind": "general_guidance"}])[-3:]
                             state["attempts"] = min(self.settings.support_max_attempts, state["attempts"] + 1)
                     else:
                         state["guidance"] = (state["guidance"] + [{"fingerprint": fingerprint, "answer": redact(result["answer"])[:500],
@@ -287,7 +298,7 @@ class ResolutionService:
                     result = self.plain(result, message("resolution_handoff_offer", language), "handoff_offer", "handoff_offered")
                 else:
                     state.update(phase="handoff_pending", pending_slot=None)
-                    reason = "explicit_handoff" if explicit else "existing_handoff" if context["ticket_reference"] else "resolution_attempts_exhausted"
+                    reason = "explicit_handoff" if explicit else "backend_action_required" if direct == "manual_action" else "existing_handoff" if context["ticket_reference"] else "resolution_attempts_exhausted"
                     result = self.plain(result, message("resolution_handoff_pending", language), "human_support" if explicit else "handoff", reason)
                     result["needs_human_support"] = True
             context["assistant_attempts"] = [item["answer"] for item in state["guidance"]]
@@ -299,7 +310,8 @@ class ResolutionService:
                                 "max_attempts": self.settings.support_max_attempts, "asked": state["asked"], "issue_id": state["issue_id"]}
         result["resolution_summary"] = {"customer_reported": context["customer_reported"], "facts": context["reported_facts"],
                                         "attempts": state["attempts"], "asked": state["asked"], "guidance": state["guidance"],
-                                        "failures": state.get("failures", []), "faq": context.get("faq")}
+                                        "failures": state.get("failures", []), "faq": context.get("faq"),
+                                        "latest_customer_update": prepared.get("_customer_message", "")}
         return result, version
 
     @staticmethod
@@ -328,6 +340,6 @@ class ResolutionService:
             if row:
                 body = json.loads(row["body"])
                 body.update({key: result[key] for key in ("answer", "answerable", "sources", "needs_human_support", "reason",
-                    "route", "resolution", "ticket", "ticket_error", "verification", "resolution_summary", "repeated_guidance") if key in result})
+                    "route", "resolution", "ticket", "ticket_error", "verification", "resolution_summary", "repeated_guidance", "failure_reason") if key in result})
                 conn.execute("UPDATE traces SET body=? WHERE id=? AND session_hash=?",
                              (encode(redact_value(body)), result["query_id"], self.owner))

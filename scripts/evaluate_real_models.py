@@ -61,6 +61,34 @@ def inspect_result(case, result):
     return failures
 
 
+def inspect_support_turn(expected, result, model_calls):
+    """Observable dialogue contracts, not an automated factual-accuracy score."""
+    failures = []
+    context, resolution = result.get("support_context", {}), result.get("resolution", {})
+    for key in expected.get("facts", []):
+        if key not in context.get("reported_facts", {}):
+            failures.append("missing_fact:" + key)
+    for key in expected.get("asked", []):
+        if key not in resolution.get("asked", []):
+            failures.append("missing_followup:" + key)
+    for key in expected.get("never_ask", []):
+        if key in resolution.get("asked", []):
+            failures.append("reasked_known_fact:" + key)
+    for value in expected.get("search_contains", []):
+        if value.casefold() not in result.get("search_query", "").casefold():
+            failures.append("missing_query_detail:" + value)
+    for key in ("phase", "attempts"):
+        if key in expected and resolution.get(key) != expected[key]:
+            failures.append("unexpected_" + key)
+    if "ticket" in expected and bool(result.get("ticket")) != expected["ticket"]:
+        failures.append("unexpected_ticket")
+    if "reason" in expected and result.get("reason") != expected["reason"]:
+        failures.append("unexpected_reason")
+    if "model_calls" in expected and model_calls != expected["model_calls"]:
+        failures.append("unexpected_model_calls")
+    return failures
+
+
 def run_checks(settings, policies, report, checkpoint=lambda: None, support_conversations=False):
     client = OllamaClient(settings)
     report.update(stage="model_preflight", status="running")
@@ -150,6 +178,29 @@ def run_checks(settings, policies, report, checkpoint=lambda: None, support_conv
                 report["support_conversations"].append({"name": name, "turns": turns, "contract_passed": passed,
                                                         "tickets_in_temporary_database_only": True})
                 checkpoint()
+            scenarios = json.loads((ROOT / "data/benchmarks/support_conversations.json").read_text())["scenarios"]
+            for scenario in scenarios:
+                name, history, turns = scenario["name"], [], []
+                session = "development-diagnostic-" + name
+                flow = ResolutionService(store, isolated, session)
+                for turn in scenario["turns"]:
+                    question = turn["question"]
+                    print(f"Support diagnostic {name}: {question}", file=sys.stderr, flush=True)
+                    prepared, before = flow.prepare(question), len(client.calls)
+                    raw = ({"answer": "", "sources": [], "route": "support_followup", "needs_human_support": False,
+                            "query_id": None, "retrieval_performed": False} if prepared.get("_resolution_direct") else
+                           service.ask(question, history, session, record=False, response_language="en", support_context=prepared))
+                    result = _escalate(question, history, session, raw, "en", prepared, settings=isolated)
+                    failures = inspect_support_turn(turn["expect"], result, len(client.calls) - before)
+                    turns.append({"question": question, "answer": result["answer"], "support_context": result.get("support_context"),
+                                  "resolution": result.get("resolution"), "sources": result.get("sources"),
+                                  "search_query": result.get("search_query"), "reason": result.get("reason"),
+                                  "ticket": result.get("ticket"), "failures": failures,
+                                  "contract_passed": not failures, "model_calls": client.calls[before:]})
+                    history.extend([{"role": "user", "content": question}, {"role": "assistant", "content": result["answer"]}])
+                report["support_conversations"].append({"name": name, "turns": turns,
+                    "contract_passed": all(turn["contract_passed"] for turn in turns), "tickets_in_temporary_database_only": True})
+                checkpoint()
         # No active index, live tickets or existing workflow state may be changed.
         if store.setting("active_index") is not None:
             raise RuntimeError("Isolated evaluation unexpectedly activated an index")
@@ -177,7 +228,7 @@ def main(argv=None):
     parser.add_argument("--verifier-model", help="Separate verifier model")
     parser.add_argument("--policies-dir", type=Path, default=ROOT / "data/policies")
     parser.add_argument("--report", type=Path, help="Save actual answers, evidence, timings and failures as JSON")
-    parser.add_argument("--support-conversations", action="store_true", help="Also test retry-budget and explicit handoff conversations in temporary state")
+    parser.add_argument("--support-conversations", action="store_true", help="Also test retry budget, diagnostic context, no-CRM handoffs and known-detail reuse in temporary state")
     args = parser.parse_args(argv)
     report = {"started_at": datetime.now(timezone.utc).isoformat(), "status": "not_started", "stage": "settings",
               "scope": "Real-model development smoke test; not human-reviewed factual accuracy or release acceptance",
