@@ -191,7 +191,7 @@ def main():
             disabled=not voice_enabled,
             help="Try Hindi / Hinglish if automatic detection struggles with mixed speech.",
         )
-        chat_language = st.selectbox("Chat language", ["Hinglish", "English", "Hindi"])
+        chat_language = st.selectbox("Chat language", ["English", "Hinglish", "Hindi"])
         response_language = {"Hinglish": "hinglish", "English": "en", "Hindi": "hi"}[chat_language]
         st.caption("Voice recordings are transcribed locally using a small multilingual model.")
         st.caption("Read-aloud voices depend on your browser and device.")
