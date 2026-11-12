@@ -5,8 +5,8 @@ from uuid import uuid4
 import streamlit as st
 from src.config import Settings
 from src.support_context import remember_customer, remember_result
-from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist, submit_feedback, faq_articles, submit_faq_feedback, reset_support_resolution
-from src.faq_ui import render_faq_help
+from src.rag_memory import MAX_HISTORY_MESSAGES, ask_shopassist, submit_feedback, faq_articles, submit_faq_feedback, open_faq, reset_support_resolution
+from src.faq_ui import render_faq_help, render_faq_feedback
 from src.speech_controls import speech_controls_html
 from src.voice import MAX_AUDIO_SECONDS, SAMPLE_RATE, SpeechInputError, transcribe_recording
 from src.support_ui import remember_ticket, render_customer_support, render_staff_workspace
@@ -30,6 +30,7 @@ def clear_conversation():
     st.session_state.pop("pending_voice_question", None)
     st.session_state.pop("pending_faq_question", None)
     st.session_state.pop("pending_faq_context", None)
+    st.session_state.pop("pending_faq_article", None)
     reset_voice_input()
 
 
@@ -38,6 +39,10 @@ def send_voice_question():
     if question:
         st.session_state.pending_voice_question = question
         reset_voice_input()
+
+
+def select_faq_article(article):
+    st.session_state.pending_faq_article = {"faq_id": article["faq_id"], "version": article["version"]}
 
 
 def handle_faq_feedback(article, outcome):
@@ -70,6 +75,8 @@ def render_message(message, index):
                 speech_controls_html(message["content"], f"reply-{index}"),
                 unsafe_allow_javascript=True,
             )
+            if message.get("faq"):
+                render_faq_feedback(message["faq"], handle_faq_feedback, f"-message-{index}")
             if message.get("needs_human_support"):
                 if message.get("ticket"):
                     st.info(f"Support ticket {message['ticket']['reference']} is in the human support queue. Check replies under Your support tickets.")
@@ -195,7 +202,27 @@ def main():
         render_staff_workspace()
         return
 
-    render_faq_help(faq_articles, handle_faq_feedback)
+    render_faq_help(faq_articles, select_faq_article)
+
+    selected_faq = st.session_state.pop("pending_faq_article", None)
+    if selected_faq:
+        try:
+            reply = open_faq(selected_faq, st.session_state.support_session)
+            question = reply["faq"]["question"]
+            st.session_state.messages.extend([
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": reply["answer"], "sources": reply["sources"], "faq": reply["faq"]},
+            ])
+            st.session_state.chat_history.extend([
+                {"role": "user", "content": question}, {"role": "assistant", "content": reply["answer"]},
+            ])
+            st.session_state.chat_history = st.session_state.chat_history[-MAX_HISTORY_MESSAGES:]
+            st.session_state.support_context = reply["support_context"]
+        except (ValueError, PermissionError) as error:
+            st.warning(str(error))
+        except Exception:
+            logger.error("Selected FAQ could not be loaded")
+            st.warning("That answer could not be loaded. Please try again or ask us in chat.")
 
     for index, message in enumerate(st.session_state.messages):
         render_message(message, index)

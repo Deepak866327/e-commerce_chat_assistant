@@ -199,6 +199,29 @@ def submit_faq_feedback(reference, outcome, session):
     return CustomerFAQs(Store(settings.state_dir / "control.sqlite3"), settings).feedback(reference, outcome, session)
 
 
+def open_faq(reference, session):
+    """Resolve the selected revision server-side and deliver its saved chat answer."""
+    from src.customer_faq import CustomerFAQs
+    from src.resolution import ResolutionService
+    from src.security import rate_limit
+    import json
+    settings = Settings.from_env()
+    store = Store(settings.state_dir / "control.sqlite3")
+    rate_limit(store, session, settings.requests_per_minute)
+    article = CustomerFAQs(store, settings).resolve(reference)
+    if not article:
+        raise ValueError("This FAQ has changed. Please select its latest question from the Help Center.")
+    sources = []
+    if article.get("chunk_id"):
+        metadata = json.loads(store.rows("SELECT metadata FROM chunks WHERE id=?", (article["chunk_id"],))[0]["metadata"])
+        label = metadata.get("source", metadata["document_id"])
+        if metadata.get("page_number") is not None:
+            label += f", page {metadata['page_number']}"
+        sources.append(label)
+    return {"answer": article["answer"], "sources": sources, "faq": article,
+            "support_context": ResolutionService(store, settings, session).read_faq(article)}
+
+
 def _support_request(call, question, history, session, response_language, support_context):
     from src.resolution import ResolutionService
     if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000:

@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from src.customer_faq import CustomerFAQs
 from src.faq_search import clear_match, ranked_articles
 from src.observability import Monitor
-from src.rag_memory import ask_shopassist, ask_structured
+from src.rag_memory import ask_shopassist, ask_structured, open_faq
 from src.security import Principal
 from tests import test_faq_publication as publication
 from tests.test_resolution_flow import unavailable, guidance
@@ -47,6 +47,26 @@ class CustomerFAQTests(unittest.TestCase):
         self.model.assert_not_called()
         structured = ask_structured(self.article["question"], [], "other", response_language="en")
         self.assertIsInstance(structured["sources"][0], dict)
+
+    def test_opening_faq_returns_saved_answer_and_preserves_zero_attempts(self):
+        reply = open_faq(self.reference, "customer")
+        self.assertEqual(reply["answer"], self.article["answer"])
+        self.assertEqual(reply["support_context"]["faq"]["outcome"], "shown")
+        state = json.loads(self.store.rows("SELECT body FROM support_sessions")[0]["body"])
+        self.assertEqual(state["attempts"], 0)
+        self.assertEqual(self.store.rows("SELECT * FROM tickets"), [])
+        self.model.assert_not_called()
+        # A short reply must address this FAQ's issue rather than start over.
+        self.ask("No")
+        context = self.model.call_args.kwargs["support_context"]
+        self.assertTrue(context["force_knowledge"])
+        self.assertEqual(context["faq"]["version"], self.article["version"])
+
+    def test_opening_withdrawn_faq_rejects_cached_answer(self):
+        self.fixture.service.transition(self.article["faq_id"], "PENDING_REVIEW", self.fixture.reviewer)
+        with self.assertRaises(ValueError):
+            open_faq(self.reference, "customer")
+        self.assertEqual(self.store.rows("SELECT * FROM support_sessions"), [])
 
     def test_feedback_is_versioned_session_scoped_and_deduplicated(self):
         self.faqs.feedback(self.reference, "helpful", "one")

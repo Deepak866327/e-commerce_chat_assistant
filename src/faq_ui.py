@@ -10,9 +10,23 @@ from src.faq_search import ranked_articles
 logger = logging.getLogger(__name__)
 
 
-def render_faq_help(load_articles, record_feedback):
+def render_faq_feedback(article, record_feedback, key_suffix):
+    st.caption("Was this answer helpful?")
+    outcome = st.session_state.get("faq_votes", {}).get(article["faq_id"] + article["version"])
+    if outcome == "helpful":
+        st.success("Thank you. We’re glad this article helped.")
+    elif outcome == "not_helpful":
+        st.caption("Continue below in chat. We’ll help with your specific issue.")
+    left, right = st.columns(2)
+    left.button("This helped", key="faq-helpful-" + article["faq_id"] + key_suffix,
+                on_click=record_feedback, args=(article, "helpful"), disabled=outcome == "helpful")
+    right.button("I still need help", key="faq-help-" + article["faq_id"] + key_suffix,
+                 on_click=record_feedback, args=(article, "not_helpful"))
+
+
+def render_faq_help(load_articles, select_article):
     with st.expander("Help center · Frequently asked questions", expanded=not st.session_state.messages):
-        st.caption("Find a quick answer, or continue in chat for help with your situation.")
+        st.caption("Select a question to get its answer in chat.")
         try:
             articles = load_articles()
         except Exception:
@@ -41,18 +55,6 @@ def render_faq_help(load_articles, record_feedback):
         if not matches:
             st.info("No matching articles. Try another search or describe your issue in chat below.")
         for article in matches:
-            with st.expander(article["question"]):
-                st.caption(article["category"])
-                st.markdown(article["answer"])
-                st.caption("Was this article helpful?")
-                outcome = st.session_state.get("faq_votes", {}).get(article["faq_id"] + article["version"])
-                if outcome == "helpful":
-                    st.success("Thank you. We’re glad this article helped.")
-                elif outcome == "not_helpful":
-                    st.caption("Continue below in chat. We’ll help with your specific issue.")
-                left, right = st.columns(2)
-                left.button("This helped", key="faq-helpful-" + article["faq_id"],
-                            on_click=record_feedback, args=(article, "helpful"), disabled=outcome == "helpful")
-                right.button("I still need help", key="faq-help-" + article["faq_id"],
-                             on_click=record_feedback, args=(article, "not_helpful"))
+            st.button(article["question"], key="faq-select-" + article["faq_id"],
+                      on_click=select_article, args=(article,), width="stretch")
         st.caption("Need personal help? Describe what happened in the chat below. Never share passwords or payment details.")

@@ -57,6 +57,24 @@ class ResolutionService:
         with self.store.connect() as conn:
             conn.execute("DELETE FROM support_sessions WHERE session_hash=?", (self.owner,))
 
+    def read_faq(self, article):
+        """Remember a saved answer shown in chat without using a support attempt."""
+        prepared = self.prepare(article["question"])
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT body FROM support_sessions WHERE session_hash=? AND version=?",
+                               (self.owner, prepared["_resolution_version"])).fetchone()
+            if not row:
+                raise ValueError("The conversation changed. Please select the question again.")
+            state = json.loads(row["body"])
+            state["context"]["faq"] = {**article, "outcome": "shown"}
+            if not state["attempts"] and state["phase"] not in {"handed_off", "handoff_pending"}:
+                state.update(phase="awaiting_outcome", pending_slot=None)
+            updated = conn.execute("UPDATE support_sessions SET body=?,version=version+1,updated_at=? WHERE session_hash=? AND version=?",
+                                   (encode(state), now(), self.owner, prepared["_resolution_version"]))
+            if updated.rowcount != 1:
+                raise ValueError("The conversation changed. Please select the question again.")
+        return clean_context(state["context"])
+
     @staticmethod
     def fresh(context):
         return {"issue_id": "ISSUE_" + uuid4().hex, "context": context, "attempts": 0, "asked": [], "guidance": [],
@@ -156,7 +174,7 @@ class ResolutionService:
                     force_knowledge = True
                 elif state["phase"] == "awaiting_outcome" and normalized in YES:
                     explicit_resolution = True
-                elif state["attempts"] and (normalized in NO or NO_HELP.search(normalized)):
+                elif (state["attempts"] or context.get("faq")) and (normalized in NO or NO_HELP.search(normalized)):
                     force_knowledge = True
             if re.search(r"\b(?:python|javascript|programming|capital of|politics|sports)\b", normalized):
                 force_knowledge = False

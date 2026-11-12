@@ -231,8 +231,10 @@ check for a staff response. Optional contact details require a configured encryp
 key. Ticket creation queues the request; it does not promise an immediate human reply.
 
 The customer **Help center · Frequently asked questions** panel offers search,
-topic filters and expandable approved answers. Opening or searching articles does
-not call a model, create tickets or consume support attempts. **I still need help**
+topic filters and clickable questions. Answers stay hidden until a question is
+selected; the question and saved answer then appear as user/assistant chat messages.
+Feedback buttons appear with the chat answer. Browsing, searching and selecting FAQs
+do not call a generation model, create tickets or consume support attempts. **I still need help**
 saves feedback and sends the FAQ ID and revision into the support flow. The server
 loads the corresponding answer itself, asks a relevant detail first, and remembers
 the unsuccessful article through later replies and any agent handoff. Answers are
